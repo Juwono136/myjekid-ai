@@ -4,9 +4,7 @@ import axios from "axios";
 
 dotenv.config();
 
-// ================================================================
-// 1. KONFIGURASI MINIO
-// ================================================================
+// KONFIGURASI MINIO
 const minioClient = new Client({
   endPoint: process.env.S3_ENDPOINT || "localhost",
   port: parseInt(process.env.S3_PORT || "9000"),
@@ -30,10 +28,7 @@ const BUCKET_NAME = process.env.S3_BUCKET_NAME || "struk-belanja";
 })();
 
 export const storageService = {
-  /**
-   * DOWNLOAD DARI URL (WAHA) -> UPLOAD KE MINIO
-   * Fungsi ini sekarang menyertakan API KEY agar tidak error 401
-   */
+  // DOWNLOAD DARI URL (WAHA) -> UPLOAD KE MINIO
   uploadFileFromUrl: async (sourceUrl, targetFilename) => {
     try {
       if (!sourceUrl || !sourceUrl.startsWith("http")) {
@@ -42,8 +37,7 @@ export const storageService = {
 
       console.log(`📥 Downloading stream from: ${sourceUrl}`);
 
-      // --- PERBAIKAN UTAMA DISINI ---
-      // Menyiapkan Header Auth jika download dari WAHA
+      // Menyiapkan Header
       const axiosConfig = {
         url: sourceUrl,
         method: "GET",
@@ -51,7 +45,6 @@ export const storageService = {
         headers: {},
       };
 
-      // Jika ada WAHA API KEY di .env, pasang di header
       if (process.env.WAHA_API_KEY) {
         axiosConfig.headers["X-Api-Key"] = process.env.WAHA_API_KEY;
         // console.log("🔑 Menggunakan API Key untuk download...");
@@ -74,10 +67,7 @@ export const storageService = {
     }
   },
 
-  /**
-   * AMBIL BUFFER DARI MINIO
-   * (Opsional: Dipakai jika suatu saat butuh kirim file manual)
-   */
+  // AMBIL BUFFER DARI MINIO
   getFileBuffer: async (fileName) => {
     try {
       const dataStream = await minioClient.getObject(BUCKET_NAME, fileName);
@@ -92,9 +82,7 @@ export const storageService = {
     }
   },
 
-  /**
-   * GENERATE PRESIGNED URL (Opsional)
-   */
+  // GENERATE PRESIGNED URL
   getPresignedUrl: async (filename) => {
     try {
       return await minioClient.presignedGetObject(BUCKET_NAME, filename, 3600);

@@ -15,20 +15,20 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// === 1. SECURITY & UTILITY MIDDLEWARE ===
+// SECURITY & UTILITY MIDDLEWARE
 app.use(helmet()); // Menambahkan HTTP Headers keamanan
 app.use(cors()); // Mengizinkan akses dari Frontend (beda domain/port)
 app.use(morgan("dev")); // Logging request (GET /webhook 200 4ms - console)
 
-// === 2. BODY PARSING ===
-// Penting: Limit body size agar server tidak crash jika dikirim file gambar base64 besar
+// BODY PARSING
+// Limit body size agar server tidak crash jika dikirim file gambar base64 besar
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// === 3. DATABASE CONNECTION ===
+// DATABASE CONNECTION
 connectDB();
 
-// === 4. ROUTE CHECK ===
+// ROUTE CHECK
 app.get("/", (req, res) => {
   res.status(200).json({
     status: "success",
@@ -38,6 +38,7 @@ app.get("/", (req, res) => {
   });
 });
 
+// APP ROUTES
 app.use("/api/webhook", webhookRoutes);
 
 // Menangkap error JSON yang malformed atau error server lainnya
@@ -53,7 +54,7 @@ app.use((err, req, res, next) => {
   await connectRedis();
 })();
 
-// === 5. START SERVER ===
+// START SERVER
 app.listen(PORT, () => {
   console.log(`\n========================================`);
   console.log(`🚀 SERVER RUNNING ON PORT ${PORT}`);

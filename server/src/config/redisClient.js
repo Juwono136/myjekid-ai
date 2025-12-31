@@ -11,7 +11,7 @@ const redisClient = createClient({
 redisClient.on("error", (err) => console.error("❌ Redis Client Error:", err));
 redisClient.on("connect", () => console.log("✅ Redis Connected to Server."));
 
-// Fungsi untuk menghubungkan (akan dipanggil di app.js)
+// Redis connects
 const connectRedis = async () => {
   try {
     if (!redisClient.isOpen) {

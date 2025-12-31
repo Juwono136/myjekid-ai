@@ -1,6 +1,6 @@
 import { ChatSession } from "../models/index.js";
 
-// API untuk Admin mematikan/menyalakan Bot user tertentu
+// API untuk Admin mematikan/menyalakan Bot user tertentu (Switch mode)
 export const setSessionMode = async (req, res) => {
   const { phone, mode, duration_minutes } = req.body;
 
@@ -13,7 +13,7 @@ export const setSessionMode = async (req, res) => {
 
     let updateData = { mode };
 
-    // Jika mode HUMAN/PAUSE, set timer otomatis (Safety Net)
+    // Jika mode HUMAN/PAUSE, set timer otomatis
     if (mode === "HUMAN") {
       const pausedUntil = new Date();
       // Default pause 30 menit jika tidak ditentukan

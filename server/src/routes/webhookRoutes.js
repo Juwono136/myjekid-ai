@@ -4,19 +4,9 @@ import { setSessionMode } from "../controllers/adminController.js";
 
 const router = express.Router();
 
-// ==================================================================
-// DEFINISI RUTE WEBHOOK
-// Base Path (nanti di app.js) akan kita set: /webhook
-// Jadi URL lengkapnya: POST /webhook/waha
-// ==================================================================
-
-// Middleware khusus route ini (opsional, misal validasi IP WAHA)
-// router.use(verifyWahaSignature);
-
 // Endpoint utama menerima pesan
 router.post("/whatsapp", webhookController.handleIncomingMessage);
 
-// Private Admin API (Nanti bisa diproteksi dengan API Key)
 // Endpoint ini yang dipanggil oleh N8N / Admin Dashboard
 router.post("/admin/session", setSessionMode);
 

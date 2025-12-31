@@ -26,7 +26,7 @@ class OllamaAdapter {
     }
   }
 
-  // Ollama Vision (Membutuhkan model LLaVA)
+  // Ollama Vision
   async extractInvoiceData(imageBuffer) {
     try {
       const response = await axios.post(`${this.baseUrl}/api/generate`, {

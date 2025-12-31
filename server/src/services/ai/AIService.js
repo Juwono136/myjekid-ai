@@ -3,7 +3,7 @@ import AIAdapterFactory from "./AIAdapterFactory.js";
 
 class AIService {
   constructor() {
-    // Meminta Factory membuatkan adapter yang sesuai config .env
+    // Meminta Factory membuatkan adapter yang sesuai file .env
     this.adapter = AIAdapterFactory.createAdapter();
   }
 
@@ -74,14 +74,12 @@ class AIService {
     return await this.adapter.generateResponse(SYSTEM_PROMPT, text, context);
   }
 
-  // =================================================================
-  // FUNGSI UTAMA: Membaca Struk/Invoice
-  // =================================================================
+  // Fungsi untuk Membaca Struk/Invoice
   async readInvoice(mediaUrl, itemsSummary = []) {
     try {
       console.log(`🤖 AI Processing: Downloading image from ${mediaUrl}...`);
 
-      // 1. Download Gambar dari WAHA (Wajib pakai Header Auth)
+      // Download Gambar dari WAHA (Wajib pakai Header Auth)
       const imageBase64 = await this.downloadImageAsBase64(mediaUrl);
 
       if (!imageBase64) {
@@ -90,7 +88,6 @@ class AIService {
 
       console.log("✅ Image downloaded. Asking Adapter to process...");
 
-      // 2. Siapkan Prompt Bisnis (Logic Aplikasi)
       const prompt = `
         Kamu adalah asisten kasir yang cerdas.
         Tugasmu: Analisa gambar struk/nota belanja ini.
@@ -103,11 +100,9 @@ class AIService {
         Jika gambar buram atau bukan struk, kembalikan angka 0.
       `;
 
-      // 3. PANGGIL ADAPTER (Generic Call)
-      // Kita tidak peduli ini Gemini, OpenAI, atau Ollama. Biar adapter yang urus.
       const aiResponseText = await this.adapter.processImage(imageBase64, "image/jpeg", prompt);
 
-      // 4. Proses Hasil (Cleaning)
+      // Proses Hasil (Cleaning)
       const cleanTotal = parseInt(aiResponseText.replace(/[^0-9]/g, "")) || 0;
 
       console.log(`💰 AI Result: Rp ${cleanTotal}`);
@@ -118,9 +113,7 @@ class AIService {
     }
   }
 
-  // =================================================================
-  // HELPER: Download Gambar (Tetap disini karena ini utility HTTP, bukan AI)
-  // =================================================================
+  // Download Gambar (base64)
   async downloadImageAsBase64(url) {
     try {
       const response = await axios.get(url, {

@@ -4,17 +4,15 @@ import { storageService } from "./storageService.js";
 
 dotenv.config();
 
-// ------------------------------------------------------------------
 // KONFIGURASI PENTING
 // WAHA_URL harus mengarah ke container WAHA (misal: http://waha:3000 atau http://localhost:7575 jika host mode)
-// ------------------------------------------------------------------
 const WAHA_URL = process.env.WAHA_API_URL || "http://localhost:7575";
 const WAHA_SESSION = process.env.WAHA_SESSION || "default";
 const WAHA_KEY = process.env.WAHA_API_KEY || "";
 
 const apiClient = axios.create({
   baseURL: WAHA_URL,
-  timeout: 15000, // Timeout 15 detik (lebih aman)
+  timeout: 15000, // Timeout 15 detik
   headers: {
     "Content-Type": "application/json",
     accept: "application/json",
@@ -48,7 +46,7 @@ export const messageService = {
     }
   },
 
-  // KIRIM GAMBAR (SOLUSI BASE64 - GRATIS & STABIL)
+  // KIRIM GAMBAR
   async sendImage(to, imageSource, caption = "") {
     try {
       const chatId = formatToWhatsAppId(to);
@@ -56,13 +54,13 @@ export const messageService = {
 
       let base64Content = null;
 
-      // KASUS A: Input sudah Base64 (Data URI)
+      // Input sudah Base64 (Data URI)
       if (imageSource && imageSource.startsWith("data:")) {
         // Ambil bagian datanya saja (setelah koma)
         base64Content = imageSource.split(",")[1];
       }
 
-      // KASUS B: Input adalah Nama File MinIO (Kita download dulu)
+      // Input adalah Nama File MinIO (download dulu)
       else if (imageSource && !imageSource.startsWith("http")) {
         console.log(`☁️ Downloading buffer from MinIO: ${imageSource}`);
         const fileBuffer = await storageService.getFileBuffer(imageSource);
@@ -75,15 +73,14 @@ export const messageService = {
         }
       }
 
-      // KASUS C: Input URL HTTP (Opsional, skip dulu agar simpel)
-
+      // Input URL HTTP (Opsional)
       if (!base64Content) {
         throw new Error("Gagal memproses data gambar.");
       }
 
-      // --- KIRIM KE WAHA ---
-      // Kita gunakan endpoint /api/sendFile
-      // Untuk versi GRATIS, kita wajib kirim datanya langsung di field 'file.data'
+      // KIRIM KE WAHA
+      // Gunakan endpoint /api/sendFile
+      // Untuk versi GRATIS, wajib kirim datanya langsung di field 'file.data'
       const payload = {
         session: WAHA_SESSION,
         chatId: chatId,
@@ -91,7 +88,7 @@ export const messageService = {
         file: {
           filename: "invoice.jpg",
           mimetype: "image/jpeg",
-          data: base64Content, // <--- INI KUNCINYA
+          data: base64Content,
         },
       };
 

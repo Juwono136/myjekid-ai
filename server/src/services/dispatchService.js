@@ -1,21 +1,21 @@
+import { Op } from "sequelize";
 import { Courier, Order } from "../models/index.js";
 import { messageService } from "./messageService.js";
-import { redisClient } from "../config/redisClient.js"; // Pastikan import redis
-import { Op } from "sequelize";
+import { redisClient } from "../config/redisClient.js";
 
 export const dispatchService = {
-  // Fungsi Utama: Cari Driver untuk Order Tertentu
+  // Cari Driver untuk Order Tertentu
   async findDriverForOrder(orderId) {
     console.log(`🔍 Dispatching Order #${orderId}...`);
 
-    // 1. Ambil Data Order
+    // Ambil Data Order
     const order = await Order.findByPk(orderId);
     if (!order) {
       console.error("❌ Order not found during dispatch");
       return;
     }
 
-    // 2. CEK KURIR ONLINE VIA REDIS (Real-time Check)
+    // CEK KURIR ONLINE VIA REDIS (Real-time Check)
     // Kita ambil semua ID kurir yang ada di set 'online_couriers'
     const onlineCourierIds = await redisClient.sMembers("online_couriers");
 
@@ -24,7 +24,7 @@ export const dispatchService = {
       return; // Tidak ada yang ditawari
     }
 
-    // 3. FILTER & SORTING (Database)
+    // FILTER & SORTING (Database)
     // Cari detail kurir yang ID-nya ada di Redis DAN statusnya IDLE
     const candidate = await Courier.findOne({
       where: {
@@ -42,25 +42,25 @@ export const dispatchService = {
 
     console.log(`✅ Kandidat Kurir Ditemukan: ${candidate.name} (${candidate.phone})`);
 
-    // 4. Tawarkan Order ke Kurir Terpilih
+    // Tawarkan Order ke Kurir Terpilih
     await this.offerOrderToCourier(order, candidate);
   },
 
   // Fungsi Penawaran
   async offerOrderToCourier(order, courier) {
     try {
-      // Format Pesan Penawaran yang Menarik
       // Handle items_summary agar aman jika null
       const items = order.items_summary || [];
       const itemsList = items.map((i) => `- ${i.item} (x${i.qty})`).join("\n");
 
-      // Kita gunakan ID yang user-friendly (order_id atau id)
+      // Gunakan ID yang user-friendly (order_id atau id)
       const displayId = order.order_id;
 
       const message =
         `🔔 *ORDER BARU MASUK!* 🔔\n\n` +
         `🆔 Order ID: *${displayId}*\n` +
         `🎯 Nama Pelanggan: *${order.name}*\n` +
+        `📱 No. HP Pelanggan: *${order.user_phone}*\n` +
         `📦 Item:\n${itemsList}\n\n` +
         `📍 Ambil: ${order.pickup_address}\n` +
         `🏁 Antar: ${order.delivery_address}\n\n` +

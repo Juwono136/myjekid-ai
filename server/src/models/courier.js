@@ -60,11 +60,7 @@ const Courier = sequelize.define(
     timestamps: true,
     createdAt: "created_at",
     updatedAt: "updated_at",
-    indexes: [
-      { fields: ["status", "shift_code"] },
-      // Indexing tambahan untuk performa pencarian kurir nganggur
-      { fields: ["last_active_at"] },
-    ],
+    indexes: [{ fields: ["status", "shift_code"] }, { fields: ["last_active_at"] }],
   }
 );
 

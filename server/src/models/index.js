@@ -6,15 +6,15 @@ import ChatSession from "./chatSession.js";
 import Admin from "./admin.js";
 import TrainingData from "./trainingData.js";
 
-// 1. User <-> Order
+// User <-> Order
 User.hasMany(Order, { foreignKey: "user_phone", sourceKey: "phone" });
 Order.belongsTo(User, { foreignKey: "user_phone", targetKey: "phone" });
 
-// 2. Courier <-> Order
+// Courier <-> Order
 Courier.hasMany(Order, { foreignKey: "courier_id", sourceKey: "id" });
 Order.belongsTo(Courier, { foreignKey: "courier_id", targetKey: "id" });
 
-// 3. User <-> ChatSession
+// User <-> ChatSession
 User.hasOne(ChatSession, { foreignKey: "phone", sourceKey: "phone" });
 ChatSession.belongsTo(User, { foreignKey: "phone", targetKey: "phone" });
 

@@ -8,15 +8,13 @@ class OrderService {
    */
   async createFromAI(userPhone, aiData) {
     try {
-      // 1. Generate Order ID yang unik tapi mudah dibaca (opsional)
-      // Atau biarkan UUID, tapi di sini kita pakai format timestamp agar unik
+      // Gunakan Format timestamp agar unik
       const orderId = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-      // 2. Hitung estimasi total (Jika AI memberikan harga, kalau tidak 0 dulu)
-      // Nanti ini bisa diupdate oleh kurir/admin
+      // Hitung estimasi total
       const estimatedTotal = 0;
 
-      // 3. Simpan ke Database
+      // Simpan ke Database
       const newOrder = await Order.create({
         order_id: orderId,
         user_phone: userPhone,
@@ -32,11 +30,11 @@ class OrderService {
       return newOrder;
     } catch (error) {
       console.error("❌ Create Order Error:", error);
-      throw error; // Lempar error agar ditangkap Controller
+      throw error;
     }
   }
 
-  // 1. Kurir Mengambil Order
+  // Kurir Mengambil Order
   async takeOrder(orderId, courierId) {
     const transaction = await sequelize.transaction();
     try {
@@ -62,7 +60,7 @@ class OrderService {
     }
   }
 
-  // 2. Simpan Draft Tagihan (Hasil AI atau Edit Manual)
+  // Simpan Draft Tagihan (Hasil AI atau Edit Manual)
   async saveBillDraft(orderId, amount, imageUrl = null) {
     const updateData = { total_amount: amount, status: "BILL_VALIDATION" };
     if (imageUrl) updateData.invoice_image_url = imageUrl;
@@ -70,7 +68,7 @@ class OrderService {
     return await Order.update(updateData, { where: { order_id: orderId } });
   }
 
-  // 3. Finalisasi Tagihan (Siap dikirim ke User)
+  // Finalisasi Tagihan (Siap dikirim ke User)
   async finalizeBill(orderId) {
     const transaction = await sequelize.transaction();
     try {

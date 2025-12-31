@@ -1,5 +1,5 @@
 export const formatSummaryReply = (name, items, pickup, address) => {
-  // Safety check: Jika items kosong/undefined, berikan array kosong
+  // Jika items kosong/undefined, berikan array kosong
   const validItems = Array.isArray(items) ? items : [];
 
   let itemList = validItems
@@ -45,14 +45,14 @@ export const getStatusMessage = (status) => {
 export const sanitizePhoneNumber = (rawInput) => {
   if (!rawInput) return null;
 
-  // 1. Buang semua karakter selain angka (spasi, strip, huruf, dll)
+  // Buang semua karakter selain angka (spasi, strip, huruf, dll)
   let clean = rawInput.toString().replace(/[^0-9]/g, "");
 
-  // 2. Jika diawali '08', ganti jadi '628'
+  // Jika diawali '08', ganti jadi '628'
   if (clean.startsWith("08")) {
     clean = "62" + clean.slice(1);
   }
-  // 3. Jika diawali '8', tambah '62' (kasus user ngetik 812...)
+  // Jika diawali '8', tambah '62' (kasus user ngetik 812...)
   else if (clean.startsWith("8")) {
     clean = "62" + clean;
   }

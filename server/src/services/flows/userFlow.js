@@ -9,30 +9,26 @@ import { orderService } from "../orderService.js";
 import { dispatchService } from "../dispatchService.js";
 
 export const handleUserMessage = async (phone, name, text, rawSenderId) => {
-  // 1. Setup Session
+  // Setup Session
   let user = await User.findOne({
     where: sequelize.or({ phone: rawSenderId }, { device_id: rawSenderId }),
   });
 
-  // ============================================================
-  // 2. GERBANG REGISTRASI (ONBOARDING)
-  // ============================================================
+  // GERBANG REGISTRASI (ONBOARDING)
   // Jika User BELUM ADA di Database, atau Datanya masih salah (Phone = 254...)
   const isInvalidUser = !user || user.phone.startsWith("254");
 
   if (isInvalidUser) {
-    // Cek apakah User sedang mengirim Nomor HP?
-    // (Mendeteksi input berupa angka minimal 10 digit)
+    // Cek apakah User sedang mengirim Nomor HP
     const potentialPhone = sanitizePhoneNumber(text);
 
     if (potentialPhone) {
-      // --- USER MENGINPUT NOMOR HP ---
-
+      // USER MENGINPUT NOMOR HP
       // Cek apakah nomor ini sudah dipakai orang lain?
       const existingUser = await User.findOne({ where: { phone: potentialPhone } });
 
       if (existingUser) {
-        // Jika nomor sudah ada, kita update device_id-nya saja (Pairing)
+        // Jika nomor sudah ada, kita update device_id-nya saja
         await existingUser.update({ device_id: rawSenderId });
         return {
           reply: `✅ *AKUN TERHUBUNG!*\n\nHalo Kak ${existingUser.name}, perangkat ini berhasil disambungkan ke nomor ${potentialPhone}.\nSilakan ketik pesanan kakak sekarang!`,
@@ -40,7 +36,7 @@ export const handleUserMessage = async (phone, name, text, rawSenderId) => {
       } else {
         // Jika benar-benar baru, Buat User Baru
         await User.create({
-          phone: potentialPhone, // SIMPAN 62... (Bersih)
+          phone: potentialPhone, // SIMPAN 62...
           name: name,
           device_id: rawSenderId, // SIMPAN 254... (Device)
         });
@@ -49,26 +45,23 @@ export const handleUserMessage = async (phone, name, text, rawSenderId) => {
         };
       }
     } else {
-      // --- USER BELUM INPUT NOMOR / INPUT SALAH ---
+      // USER BELUM INPUT NOMOR / INPUT SALAH
       return {
         reply: `👋 Halo Kak! Selamat datang di MyJek.\n\nKarena Kakak baru pertama kali chat (atau pakai WA Web), mohon verifikasi nomor HP dulu ya.\n\n👉 *Silakan ketik Nomor WA Kakak* (Contoh: 08123456789) agar sistem bisa memproses pesanan.`,
       };
     }
   }
 
-  // Jika User Valid, ambil nomor HP aslinya untuk dipakai di logic selanjutnya
+  // Jika User Valid, ambil nomor HP aslinya
   const realPhone = user.phone;
   const [session] = await ChatSession.findOrCreate({
     where: { phone: realPhone },
     defaults: { mode: "BOT" },
   });
 
-  // ============================================================
-  // 🛠️ LOGIKA TANGKAP NOMOR HP USER (KHUSUS WA WEB)
-  // ============================================================
+  // AMBIL NOMOR HP USER (KHUSUS WA WEB)
   // Jika phone yang tersimpan adalah ID Perangkat (dimulai 254/belum format 62),
   // Kita minta user update nomornya agar tersimpan rapi.
-
   const isDeviceID = phone.startsWith("254") || phone.includes("@lid");
 
   // Jika User mengirim perintah update nomor: #HP 08123...
@@ -76,9 +69,6 @@ export const handleUserMessage = async (phone, name, text, rawSenderId) => {
     const inputPhone = text.split(" ")[1];
     if (inputPhone && inputPhone.length > 9) {
       // Update data user: Pindahkan ID 254 ke device_id, simpan nomor baru ke phone
-      // Ini agak tricky karena 'phone' adalah primary key pencarian.
-      // Strategi: Update field saja.
-
       await user.update({
         phone: inputPhone, // Simpan nomor asli
         device_id: rawSenderId, // Simpan ID 254 ke device_id
@@ -90,30 +80,27 @@ export const handleUserMessage = async (phone, name, text, rawSenderId) => {
 
   // Jika ini User Baru pakai WA Web (ID 254) dan belum pernah setor nomor
   if (isDeviceID && !user.device_id) {
-    // Kita bisa 'memaksa' atau 'mengimbau' user
-    // Opsional: Blokir order kalau belum ada nomor, atau biarkan saja.
-    // Disini saya pakai himbauan saja di console, atau bisa reply bot.
     console.log("⚠️ User menggunakan WA Web tapi belum verifikasi nomor HP.");
 
-    // (Opsional) Uncomment baris bawah jika ingin BOT minta nomor dulu
-    // return { reply: "Halo Kak! 👋 Karena kakak pakai WA Web, tolong ketik *#HP <NOMOR_WA>* dulu ya biar ordernya lancar. Contoh: #HP 08123456789" };
+    return {
+      reply:
+        "Halo Kak! 👋 Kami butuh informasi no HP dulu nih kak, tolong ketik *#HP <NOMOR_WA>* dulu ya biar ordernya lancar. Contoh: #HP 08123456789",
+    };
   }
 
   // LOGIC PAUSE / HUMAN HANDOFF
   if (session.mode === "HUMAN" || session.paused_until) {
     const now = new Date();
 
-    // 1. Cek Auto-Resume Timer (Safety Net)
+    // Cek Auto-Resume Timer
     // Jika admin set pause sampai jam X, dan sekarang sudah lewat, nyalakan bot.
     if (session.paused_until && now >= new Date(session.paused_until)) {
       await session.update({ mode: "BOT", paused_until: null });
       console.log(`🔔 Auto-Resume: Bot Woke Up for ${phone}`);
-      // Lanjut ke proses AI di bawah...
     }
-    // 2. Jika masih dalam masa hukuman/manual mode
+    // Jika masih dalam masa hukuman/manual mode
     else {
       console.log(`👤 Human Mode Active for ${phone}. Bot ignored message.`);
-      // HAPUS LOGIKA if (text === "#bot") DISINI.
       // User tidak bisa memaksa bot hidup.
       return res.status(200).json({ status: "ignored_human_mode" });
     }
@@ -122,7 +109,7 @@ export const handleUserMessage = async (phone, name, text, rawSenderId) => {
   console.log(`🤖 Processing: ${name} (${phone}) - Msg: "${text}"`);
 
   try {
-    // 3. Context Gathering
+    // Context Gathering
     const draftOrder = await Order.findOne({
       where: { user_phone: phone, status: "DRAFT" },
       order: [["created_at", "DESC"]],
@@ -164,11 +151,11 @@ export const handleUserMessage = async (phone, name, text, rawSenderId) => {
         user.address_text || (lastSuccessOrder ? lastSuccessOrder.delivery_address : null),
     };
 
-    // 4. AI Processing
+    // AI Processing
     const aiResult = await aiService.parseOrder(text, contextData);
     let finalReply = aiResult.reply || aiResult.ai_reply || "";
 
-    // 5. Data Merging & Logic
+    // Data Merging & Logic
     const mergedItems =
       aiResult.data?.items?.length > 0 ? aiResult.data.items : draftOrder?.items_summary || [];
     const mergedPickup = aiResult.data?.pickup_location || draftOrder?.pickup_address || null;
@@ -183,9 +170,7 @@ export const handleUserMessage = async (phone, name, text, rawSenderId) => {
       lowerText.includes(w)
     );
 
-    // --- LOGIC CHAIN ---
-
-    // P1: Safety Guard
+    // Safety Guard
     if (
       activeOrder &&
       !draftOrder &&
@@ -195,13 +180,13 @@ export const handleUserMessage = async (phone, name, text, rawSenderId) => {
       finalReply =
         "⚠️ Mohon maaf Kak, pesanan sebelumnya sudah diproses sistem (sedang cari driver/berjalan).\n\nData tidak bisa diubah langsung. Silakan balas *Batal* terlebih dahulu jika ingin mengganti pesanan.";
     }
-    // P2: Polite Guard
+    // Polite Guard
     else if (isPolite && !draftOrder && !["CHECK_STATUS", "CANCEL"].includes(aiResult.intent)) {
       finalReply = activeOrder
         ? `Sama-sama Kak! Pesanan Kakak ${getStatusMessage(activeOrder.status)}. Ditunggu ya 😃`
         : "Sama-sama Kak! Kabari saja kalau mau pesan lagi ya.";
     }
-    // P3: Check Status
+    // Check Status
     else if (aiResult.intent === "CHECK_STATUS") {
       if (activeOrder)
         finalReply = `Halo Kak ${name}, pesanan Kakak saat ini *${getStatusMessage(
@@ -211,14 +196,14 @@ export const handleUserMessage = async (phone, name, text, rawSenderId) => {
         finalReply = `Kakak punya pesanan Draft yang belum dikonfirmasi nih. Mau dilanjutin?`;
       else finalReply = `Saat ini Kakak tidak punya pesanan aktif. Mau pesan sesuatu kak?`;
     }
-    // P4: CANCEL (Smart Logic with Target)
+    // CANCEL
     else if (aiResult.intent === "CANCEL") {
-      // A. Cancel Draft (Paling Prioritas)
+      // Cancel Draft
       if (draftOrder) {
         await draftOrder.update({ status: "CANCELLED" });
         finalReply = "👌 Oke, Pesanan baru (Draft) dibatalkan.";
       } else {
-        // B. Cek Order 'LOOKING_FOR_DRIVER' (Bisa dibatalkan)
+        // Cek Order 'LOOKING_FOR_DRIVER' (Bisa dibatalkan)
         const pendingOrders = await Order.findAll({
           where: { user_phone: phone, status: "LOOKING_FOR_DRIVER" },
           order: [["created_at", "DESC"]],
@@ -245,7 +230,6 @@ export const handleUserMessage = async (phone, name, text, rawSenderId) => {
 
           if (cleanText.length > 0) {
             targetOrder = pendingOrders.find((o) => {
-              // FIX: Gunakan o.order_id sesuai schema Anda, fallback ke o.id
               const realId = o.order_id || o.id;
               const idMatch = String(realId).includes(cleanText);
               const itemMatch = o.items_summary.some((i) =>
@@ -260,11 +244,10 @@ export const handleUserMessage = async (phone, name, text, rawSenderId) => {
             const item = targetOrder.items_summary?.[0]?.item || "Pesanan";
             finalReply = `⚠️ Pesanan *${item}* berhasil dibatalkan.`;
           } else {
-            // Tampilkan List (FIX UNDEFINED HERE)
+            // Tampilkan List
             const listStr = pendingOrders
               .map((o) => {
                 const item = o.items_summary?.[0]?.item || "Item";
-                // FIX: Mengambil ID yang benar (order_id)
                 const displayId = o.order_id || o.id;
                 return `- ${item} (Ketik: Batal ${displayId})`;
               })
@@ -275,7 +258,7 @@ export const handleUserMessage = async (phone, name, text, rawSenderId) => {
         }
       }
     }
-    // P5: Confirm
+    // Confirm
     else if (aiResult.intent === "CONFIRM_FINAL") {
       if (draftOrder) {
         const validItems = draftOrder.items_summary && draftOrder.items_summary.length > 0;
@@ -292,22 +275,22 @@ export const handleUserMessage = async (phone, name, text, rawSenderId) => {
             "⚠️ Mohon maaf Kak, *Alamat Pengantaran* belum diisi nih.\n\nMau diantar ke mana? (Silahkan ketik Nama Jalan, No Rumah/Patokan)";
         } else {
           // DATA LENGKAP -> EKSEKUSI
-          // 1. Update Status di Database
+          // Update Status di Database
           await draftOrder.update({ status: "LOOKING_FOR_DRIVER" });
 
-          // 2. Update Data User (Simpan alamat terakhir)
+          // Update Data User (Simpan alamat terakhir)
           await user.update({
             address_text: draftOrder.delivery_address,
             last_order_date: new Date(),
           });
 
-          // 3. TRIGGER DISPATCHER (PANGGIL KURIR)
+          // TRIGGER DISPATCHER (PANGGIL KURIR)
           // Jalankan secara background (tanpa await) agar user langsung dapat balasan
           dispatchService
             .findDriverForOrder(draftOrder.order_id)
             .catch((err) => console.error("❌ Dispatch Error:", err));
 
-          // 4. Balas ke User
+          // Balas ke User
           finalReply =
             "✅ *Pesanan Dikonfirmasi!*\n\nSistem sedang mencarikan kurir terdekat. Mohon tunggu sebentar yah kak...";
         }
@@ -317,9 +300,9 @@ export const handleUserMessage = async (phone, name, text, rawSenderId) => {
         finalReply = "Siap Kak! Ada yang bisa saya bantu pesankan lagi?";
       }
     }
-    // P6: Order Process
+    // Order Process
     else if (["ORDER_INCOMPLETE", "ORDER_COMPLETE"].includes(aiResult.intent)) {
-      // 1. UPDATE DATABASE (Simpan data parsial/lengkap)
+      // UPDATE DATABASE (Simpan data parsial/lengkap)
       if (draftOrder) {
         await draftOrder.update({
           items_summary: mergedItems,
@@ -342,20 +325,20 @@ export const handleUserMessage = async (phone, name, text, rawSenderId) => {
         });
       }
 
-      // 2. VALIDASI KELENGKAPAN DATA (Cek Ulang)
-      // Kita cek merged data + data history user
+      // VALIDASI KELENGKAPAN DATA (Cek Ulang)
+      // Cek merged data + data history user
       const finalAddress = mergedAddress || draftOrder?.delivery_address || user.address_text || "";
 
       const hasItems = mergedItems.length > 0;
       const hasPickup = mergedPickup && mergedPickup.length > 2;
       const hasAddress = finalAddress && finalAddress.length > 3;
 
-      // 3. TENTUKAN BALASAN (Conditional Reply)
+      // TENTUKAN BALASAN (Conditional Reply)
       if (hasItems && hasPickup && hasAddress) {
-        // A. DATA LENGKAP -> Tampilkan Struk Konfirmasi
+        // DATA LENGKAP -> Tampilkan Struk Konfirmasi
         finalReply = formatSummaryReply(name, mergedItems, mergedPickup, finalAddress);
       } else {
-        // B. DATA BELUM LENGKAP -> Tanya Kekurangannya Saja (Jangan kasih struk)
+        // DATA BELUM LENGKAP -> Tanya Kekurangannya Saja (Jangan kasih struk)
 
         if (!hasItems) {
           finalReply = "Siap Kak. Mau pesan menu apa?";
@@ -364,12 +347,12 @@ export const handleUserMessage = async (phone, name, text, rawSenderId) => {
           const menuName = mergedItems[0].item || "makanan";
           finalReply = `Oke, pesan *${menuName}*. Mau dibelikan di warung/toko mana Kak?`;
         } else {
-          // Berarti kurang alamat
+          // kurang alamat
           finalReply = `Siap, *${mergedItems[0].item}* dari *${mergedPickup}*.\n\nMau diantar ke alamat mana Kak? (Tulis nama jalan/patokan)`;
         }
       }
     }
-    // P7: Fallback
+    // Fallback
     else {
       if (!finalReply)
         finalReply =

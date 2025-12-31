@@ -8,9 +8,7 @@ class LMStudioAdapter {
     this.apiKey = process.env.LMSTUDIO_API_KEY || "lm-studio";
   }
 
-  // =================================================================
-  // 1. TEXT CHAT (User Flow)
-  // =================================================================
+  // TEXT CHAT (User Flow)
   async generateResponse(systemPrompt, userText, context = {}) {
     try {
       const contextString = JSON.stringify(context, null, 2);
@@ -51,13 +49,10 @@ class LMStudioAdapter {
     }
   }
 
-  // =================================================================
-  // 2. IMAGE PROCESSING (Struk/Vision Flow) -- [DITAMBAHKAN]
-  // =================================================================
+  // IMAGE PROCESSING (Struk/Vision)
   async processImage(base64Data, mimeType, prompt) {
     try {
       // Format Payload Standar OpenAI Vision
-      // LM Studio mensupport format ini
       const messages = [
         {
           role: "user",
@@ -69,7 +64,7 @@ class LMStudioAdapter {
             {
               type: "image_url",
               image_url: {
-                // Format Data URI wajib: data:image/jpeg;base64,....
+                // Format Data URI: data:image/jpeg;base64,....
                 url: `data:${mimeType};base64,${base64Data}`,
               },
             },
@@ -115,9 +110,7 @@ class LMStudioAdapter {
     }
   }
 
-  // =================================================================
   // HELPER JSON
-  // =================================================================
   cleanAndParseJson(text) {
     try {
       let cleanText = text

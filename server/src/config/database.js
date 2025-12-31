@@ -15,7 +15,7 @@ const connectDB = async () => {
     console.log("✅ Database Connected Successfully.");
 
     // Sinkronisasi Tabel (Alter: update struktur jika ada perubahan, tanpa hapus data)
-    // Di Production nanti sebaiknya pakai Migrations.
+    // Note: Di Production nanti sebaiknya pakai Migrations.
     await sequelize.sync({ alter: true });
     console.log("✅ Database Models Synced.");
   } catch (error) {

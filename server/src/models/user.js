@@ -19,7 +19,6 @@ const User = sequelize.define(
       allowNull: false,
     },
     address_text: DataTypes.TEXT,
-    // Pemisahan Lat/Long agar kalkulasi jarak presisi
     latitude: { type: DataTypes.FLOAT, allowNull: true },
     longitude: { type: DataTypes.FLOAT, allowNull: true },
     last_order_date: DataTypes.DATE,

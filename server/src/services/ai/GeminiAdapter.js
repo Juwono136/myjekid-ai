@@ -6,7 +6,7 @@ class GeminiAdapter {
     this.model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
   }
 
-  // Fungsi Utama: Chat Text
+  // Chat Text
   async generateResponse(systemPrompt, userMessage, context = {}) {
     try {
       // Gabungkan System Prompt + Context + User Message
@@ -34,7 +34,7 @@ class GeminiAdapter {
     }
   }
 
-  // Fungsi OCR (Vision)
+  // Fungsi OCR
   async extractInvoiceData(imageBuffer) {
     try {
       const prompt =

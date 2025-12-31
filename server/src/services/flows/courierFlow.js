@@ -8,8 +8,6 @@ import { dispatchService } from "../dispatchService.js";
 import { sanitizePhoneNumber } from "../../utils/formatter.js";
 import { storageService } from "../storageService.js";
 
-// --- HELPER FUNCTIONS ---
-
 const toIDR = (num) =>
   new Intl.NumberFormat("id-ID", {
     style: "currency",
@@ -34,13 +32,13 @@ const getDashboardReply = (courier) => {
   );
 };
 
-// --- LOGIC FINALISASI TAGIHAN (UPDATED: MANUAL SEND MECHANISM) ---
+// FINALISASI TAGIHAN
 const executeBillFinalization = async (courierId, orderId) => {
   const order = await orderService.finalizeBill(orderId);
   if (!order) return null;
 
-  // 1. Notifikasi ke Customer (TEXT ONLY - Agar Aman & Profesional)
-  // Kita informasikan bahwa nota akan dikirim manual oleh driver
+  // Notifikasi ke Customer (TEXT ONLY - Agar Aman & Profesional)
+  // Informasikan bahwa nota akan dikirim manual oleh driver
   const captionUser =
     `Halo Kak! 👋\n` +
     `Belanjaan sudah selesai dibeli.\n\n` +
@@ -53,7 +51,7 @@ const executeBillFinalization = async (courierId, orderId) => {
   // Gunakan sendMessage (Text), bukan sendImage agar stabil
   await messageService.sendMessage(order.user_phone, captionUser);
 
-  // 2. Balasan ke Kurir (Instruksi Manual)
+  // Balasan ke Kurir (Instruksi Manual)
   return (
     `✅ *TAGIHAN TERKONFIRMASI!*\n` +
     `Nominal: ${toIDR(order.total_amount)}\n\n` +
@@ -64,8 +62,6 @@ const executeBillFinalization = async (courierId, orderId) => {
     `👉 Ketik *#SELESAI* jika barang sudah diterima customer.`
   );
 };
-
-// --- MAIN HANDLER ---
 
 export const handleCourierMessage = async (
   courier,
@@ -84,10 +80,7 @@ export const handleCourierMessage = async (
       )}...`
     );
 
-    // ============================================================
-    // 1. GATEKEEPER & LOGIN
-    // ============================================================
-
+    // LOGIN
     if (upperText.startsWith("#LOGIN")) {
       const inputPhone = upperText.split(" ")[1];
       if (!inputPhone) return { reply: "⚠️ *Format Salah*\nContoh: `#LOGIN 08123456789`" };
@@ -114,9 +107,7 @@ export const handleCourierMessage = async (
       return { reply: "👋 Silakan Login: ketik\n*#LOGIN <NOMOR_HP_ANDA>*" };
     }
 
-    // ============================================================
-    // 2. ACTIVE ORDER FLOW
-    // ============================================================
+    // ACTIVE ORDER FLOW
     const activeOrder = await Order.findOne({
       where: {
         courier_id: courier.id,
@@ -125,12 +116,12 @@ export const handleCourierMessage = async (
     });
 
     if (activeOrder) {
-      // --- A. FASE BELANJA (ON_PROCESS) ---
+      // FASE BELANJA (ON_PROCESS)
       if (activeOrder.status === "ON_PROCESS") {
         // JIKA INPUT GAMBAR (URL / Base64)
         if (mediaUrl || rawBase64) {
           // Respon cepat agar tidak timeout (Return NULL ke N8N agar koneksi putus)
-          // Kita kirim pesan proses via messageService
+          // Kirim pesan proses via messageService
           await messageService.sendMessage(
             courier.phone,
             "⏳ *Sedang Scan Struk...*\nSistem sedang menyimpan bukti & scan harga..."
@@ -141,17 +132,13 @@ export const handleCourierMessage = async (
             try {
               const fileName = `invoice_${activeOrder.order_id}_${Date.now()}.jpg`;
 
-              // --- PERBAIKAN PENTING DISINI ---
-              // Sebelumnya argumen Anda terbalik.
-              // Benar: (sourceUrl, targetFilename)
               const storedFileName = await storageService.uploadFileFromUrl(
-                mediaUrl || rawBase64, // URL/Source Dulu
-                fileName // Nama File Tujuan Kemudian
+                mediaUrl || rawBase64, // URL/Source
+                fileName // Nama File Tujuan
               );
 
               if (!storedFileName) throw new Error("Gagal simpan ke MinIO");
 
-              // AI Logic
               let cleanBase64 = rawBase64
                 ? rawBase64.replace(/^data:image\/\w+;base64,/, "")
                 : null;
@@ -166,7 +153,7 @@ export const handleCourierMessage = async (
               // Simpan Draft (File Name tersimpan di DB, tapi tidak dikirim otomatis ke user)
               await orderService.saveBillDraft(activeOrder.order_id, detectedTotal, storedFileName);
 
-              // Auto-Confirm Logic (3 Menit)
+              // Auto-Confirm (3 Menit)
               setTimeout(async () => {
                 const freshOrder = await Order.findByPk(activeOrder.order_id);
                 if (
@@ -210,14 +197,14 @@ export const handleCourierMessage = async (
         };
       }
 
-      // --- B. FASE KONFIRMASI (BILL_VALIDATION) ---
+      // KONFIRMASI (BILL_VALIDATION)
       else if (activeOrder.status === "BILL_VALIDATION") {
         const cleanNum = upperText.replace(/[^0-9]/g, "");
         const validYes = ["Y", "YA", "YES", "OK", "OKE", "SIAP", "BENAR"];
 
         // JIKA CONFIRM "Y"
         if (validYes.includes(upperText)) {
-          // Panggil fungsi finalisasi yang sudah diubah (Manual Send Mechanism)
+          // Panggil fungsi finalisasi yang sudah diubah
           const reply = await executeBillFinalization(courier.id, activeOrder.order_id);
           return { reply: reply || "⚠️ Gagal memproses data. Coba lagi." };
         }
@@ -236,7 +223,7 @@ export const handleCourierMessage = async (
         };
       }
 
-      // --- C. FASE PENGANTARAN (BILL_SENT) ---
+      // FASE PENGANTARAN (BILL_SENT)
       else if (activeOrder.status === "BILL_SENT") {
         if (upperText === "#SELESAI") {
           await orderService.completeOrder(activeOrder.order_id, courier.id);
@@ -256,10 +243,7 @@ export const handleCourierMessage = async (
       }
     }
 
-    // ============================================================
-    // 3. GLOBAL COMMANDS
-    // ============================================================
-
+    // GLOBAL COMMANDS
     if (upperText === "#SIAP") {
       await courier.update({ status: "IDLE", last_active_at: new Date() });
       await redisClient.sAdd("online_couriers", String(courier.id));

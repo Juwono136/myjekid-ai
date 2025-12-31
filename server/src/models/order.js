@@ -8,12 +8,11 @@ const Order = sequelize.define(
       type: DataTypes.STRING(50),
       primaryKey: true,
     },
-    // Foreign Keys didefinisikan di asosiasi bawah, tapi field perlu ada
     user_phone: { type: DataTypes.STRING(20), allowNull: false },
-    courier_id: { type: DataTypes.UUID, allowNull: true }, // Mengikuti tipe UUID Courier
+    courier_id: { type: DataTypes.UUID, allowNull: true },
 
     raw_message: DataTypes.TEXT,
-    items_summary: DataTypes.JSONB, // Sesuai kebutuhan JSON data
+    items_summary: DataTypes.JSONB,
 
     invoice_image_url: DataTypes.TEXT,
     total_amount: {
