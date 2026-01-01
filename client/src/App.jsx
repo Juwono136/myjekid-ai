@@ -10,6 +10,7 @@ import UserManagement from "./pages/UserManagement";
 import RoleBasedRoute from "./components/RoleBasedRoute";
 import Settings from "./pages/Settings";
 import CourierManagement from "./pages/CourierManagement";
+import LiveMap from "./pages/LiveMap";
 
 // Placeholder Pages (Untuk Menu Lain yang belum dibuat)
 const PlaceholderPage = ({ title }) => (
@@ -40,7 +41,7 @@ function App() {
           <Route index element={<DashboardHome />} />
 
           {/* Child routes: /dashboard/map, dll */}
-          <Route path="map" element={<PlaceholderPage title="Live Map Kurir" />} />
+          <Route path="map" element={<LiveMap />} />
           <Route path="orders" element={<PlaceholderPage title="Order Monitor" />} />
           <Route path="chat" element={<PlaceholderPage title="Intervention Chat" />} />
           <Route path="reports" element={<PlaceholderPage title="Laporan Transaksi" />} />

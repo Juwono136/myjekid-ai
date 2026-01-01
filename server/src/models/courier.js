@@ -38,8 +38,8 @@ const Courier = sequelize.define(
     },
 
     // Lokasi Kurir Real-time
-    current_latitude: { type: DataTypes.FLOAT },
-    current_longitude: { type: DataTypes.FLOAT },
+    current_latitude: { type: DataTypes.DOUBLE },
+    current_longitude: { type: DataTypes.DOUBLE },
 
     // Digunakan untuk algoritma prioritas pembagian order (Siapa paling lama nganggur)
     last_active_at: {
