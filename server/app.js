@@ -7,7 +7,12 @@ import { connectRedis } from "./src/config/redisClient.js";
 import { connectDB } from "./src/config/database.js";
 // import "./src/models/index.js";
 
+import globalErrorHandler from "./src/middleware/errorMiddleware.js";
+import AppError from "./src/utils/AppError.js";
+import logger from "./src/utils/logger.js";
+
 import webhookRoutes from "./src/routes/webhookRoutes.js";
+import apiRoutes from "./src/routes/apiRoutes.js";
 
 // Load environment variables
 dotenv.config();
@@ -18,7 +23,24 @@ const PORT = process.env.PORT || 5000;
 // SECURITY & UTILITY MIDDLEWARE
 app.use(helmet()); // Menambahkan HTTP Headers keamanan
 app.use(cors()); // Mengizinkan akses dari Frontend (beda domain/port)
-app.use(morgan("dev")); // Logging request (GET /webhook 200 4ms - console)
+
+// Custom Morgan untuk connect ke Winston Logger (File Log)
+const morganFormat = ":method :url :status :response-time ms - :res[content-length]";
+app.use(
+  morgan(morganFormat, {
+    stream: {
+      write: (message) => {
+        const logObject = {
+          method: message.split(" ")[0],
+          url: message.split(" ")[1],
+          status: message.split(" ")[2],
+          responseTime: message.split(" ")[3],
+        };
+        logger.info(JSON.stringify(logObject));
+      },
+    },
+  })
+);
 
 // BODY PARSING
 // Limit body size agar server tidak crash jika dikirim file gambar base64 besar
@@ -27,6 +49,11 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // DATABASE CONNECTION
 connectDB();
+
+// REDIS
+(async () => {
+  await connectRedis();
+})();
 
 // ROUTE CHECK
 app.get("/", (req, res) => {
@@ -40,19 +67,15 @@ app.get("/", (req, res) => {
 
 // APP ROUTES
 app.use("/api/webhook", webhookRoutes);
+app.use("/api", apiRoutes);
 
-// Menangkap error JSON yang malformed atau error server lainnya
-app.use((err, req, res, next) => {
-  console.error("❌ Global Error:", err.stack);
-  res.status(500).json({
-    status: "error",
-    message: "Internal Server Error",
-  });
+// Handle 404 (Route Not Found)
+app.use((req, res, next) => {
+  next(new AppError(`Can't find ${req.originalUrl} on this server!`, 404));
 });
 
-(async () => {
-  await connectRedis();
-})();
+// GLOBAL ERROR HANDLER
+app.use(globalErrorHandler);
 
 // START SERVER
 app.listen(PORT, () => {

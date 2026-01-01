@@ -10,9 +10,8 @@ server/.env
 /.pnp
 .pnp.js
 
-server/fix_courier_phone.js
-server/seed_courier.js
-server/test_dispatch.js
+server/seeders
+server/logs
 
 # testing
 /coverage
