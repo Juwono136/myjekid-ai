@@ -127,7 +127,8 @@ export const createCourier = async (req, res, next) => {
 export const updateCourier = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { name, phone, shift_code, status, is_active } = req.body;
+    const { name, phone, shift_code, status, is_active, current_latitude, current_longitude } =
+      req.body;
 
     const courier = await Courier.findByPk(id);
     if (!courier) return next(new AppError("Kurir tidak ditemukan", 404));
@@ -155,9 +156,30 @@ export const updateCourier = async (req, res, next) => {
     if (status) courier.status = status;
     if (is_active !== undefined) courier.is_active = is_active;
 
+    let locationChanged = false;
+    if (current_latitude !== undefined && current_longitude !== undefined) {
+      courier.current_latitude = current_latitude;
+      courier.current_longitude = current_longitude;
+      courier.last_active_at = new Date();
+      locationChanged = true;
+    }
+
     await courier.save();
 
     logger.info(`Data kurir diupdate: ${courier.name} (ID: ${id})`);
+
+    if (req.io && locationChanged) {
+      req.io.emit("courier-location-update", {
+        id: courier.id,
+        name: courier.name,
+        phone: courier.phone,
+        lat: parseFloat(courier.current_latitude),
+        lng: parseFloat(courier.current_longitude),
+        status: courier.status,
+        updatedAt: courier.last_active_at,
+      });
+      // console.log(`Socket Emitted: ${courier.name} moved to ${current_latitude}, ${current_longitude}`);
+    }
 
     res.status(200).json({
       status: "success",

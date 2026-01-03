@@ -1,6 +1,9 @@
-import React, { useEffect, useState, useRef, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { fetchCouriers } from "../features/courierSlice";
+import { socket } from "../services/socketClient";
+
+// --- COMPONENTS ---
 import CourierMap from "../components/map/CourierMap";
 import CourierListOverlay from "../components/map/CourierListOverlay";
 import PageHeader from "../components/common/PageHeader";
@@ -8,41 +11,33 @@ import { FiMap } from "react-icons/fi";
 import Loader from "../components/Loader";
 import useDebounce from "../hooks/useDebounce";
 
-// --- Helper Mock Coordinates ---
-const injectMockCoordinates = (data) => {
-  return data.map((item) => ({
-    ...item,
-    // Koordinat acak disekitaran Jakarta (hanya dummy)
-    // Nanti hapus ini jika backend sudah kirim lat/lng
-    lat: item.lat || -6.1751 + (Math.random() - 0.5) * 0.05,
-    lng: item.lng || 106.865 + (Math.random() - 0.5) * 0.05,
-  }));
-};
-
 const LiveMap = () => {
   const dispatch = useDispatch();
-  const { couriers, isLoading } = useSelector((state) => state.courier);
+  const { isLoading } = useSelector((state) => state.courier);
 
-  // State Data Mentah (Semua Kurir)
   const [allMapData, setAllMapData] = useState([]);
-
-  // State Seleksi & Search
   const [selectedCourier, setSelectedCourier] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
-
-  // FIX 1: Gunakan hasil debounce
   const debouncedSearch = useDebounce(searchTerm, 500);
-
-  // Refresh State
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const intervalRef = useRef(null);
 
-  // --- Fetch Data Function ---
+  // Helper: Normalisasi Data
+  const normalizeCourierData = (data) => {
+    return data.map((c) => ({
+      ...c,
+      // Jika null, biarkan null. Jangan di-filter di sini.
+      lat: c.lat || c.current_latitude || null,
+      lng: c.lng || c.current_longitude || null,
+    }));
+  };
+
   const loadData = async (showLoading = true) => {
     if (showLoading) setIsRefreshing(true);
     try {
-      // Ambil 100 data agar map ramai
-      await dispatch(fetchCouriers({ page: 1, limit: 100, status: "ALL" })).unwrap();
+      const result = await dispatch(fetchCouriers({ page: 1, limit: 100, status: "ALL" })).unwrap();
+      if (result && result.data) {
+        setAllMapData(normalizeCourierData(result.data));
+      }
     } catch (err) {
       console.error("Gagal load map data:", err);
     } finally {
@@ -50,38 +45,71 @@ const LiveMap = () => {
     }
   };
 
-  // --- Initial Load & Polling ---
   useEffect(() => {
     loadData();
-    intervalRef.current = setInterval(() => {
-      loadData(false); // Silent refresh
-    }, 30000);
+
+    if (!socket.connected) {
+      socket.connect();
+    }
+
+    const handleLocationUpdate = (data) => {
+      setAllMapData((prevData) => {
+        const index = prevData.findIndex((c) => c.id === data.id);
+        if (index !== -1) {
+          const updatedList = [...prevData];
+          updatedList[index] = {
+            ...updatedList[index],
+            lat: data.lat,
+            lng: data.lng,
+            last_active_at: data.updatedAt || new Date(),
+            status: "BUSY",
+          };
+          return updatedList;
+        } else {
+          // Insert baru jika belum ada
+          return [
+            ...prevData,
+            {
+              id: data.id,
+              name: data.name || "Kurir Baru",
+              phone: data.phone || "",
+              lat: data.lat,
+              lng: data.lng,
+              status: "BUSY",
+              last_active_at: new Date(),
+            },
+          ];
+        }
+      });
+    };
+
+    socket.on("courier-location-update", handleLocationUpdate);
 
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      socket.off("courier-location-update", handleLocationUpdate);
     };
   }, [dispatch]);
 
-  // --- Update Data with Mock Coords ---
-  useEffect(() => {
-    if (couriers.length > 0) {
-      // Kita anggap couriers dari Redux adalah "Master Data"
-      // Inject dummy coords jika belum ada
-      const dataWithLoc = injectMockCoordinates(couriers);
-      setAllMapData(dataWithLoc);
-    }
-  }, [couriers]);
-
-  // FIX 2: Filtering Logic menggunakan Debounced Value
-  // Memoize agar tidak kalkulasi ulang setiap render kecil
+  // --- FILTERING LOGIC DIPERBAIKI ---
   const filteredCouriers = useMemo(() => {
-    if (!debouncedSearch) return allMapData;
+    // JANGAN filter berdasarkan lat/lng di sini agar tetap muncul di list
+    let result = allMapData;
 
-    const lowerSearch = debouncedSearch.toLowerCase();
-    return allMapData.filter(
-      (c) => c.name.toLowerCase().includes(lowerSearch) || c.phone.includes(lowerSearch)
-    );
+    if (debouncedSearch) {
+      const lowerSearch = debouncedSearch.toLowerCase();
+      result = result.filter(
+        (c) =>
+          (c.name && c.name.toLowerCase().includes(lowerSearch)) ||
+          (c.phone && c.phone.includes(lowerSearch))
+      );
+    }
+    return result;
   }, [allMapData, debouncedSearch]);
+
+  // Siapkan data khusus untuk Map (Hanya yang punya Lat/Lng)
+  const mapMarkers = useMemo(() => {
+    return filteredCouriers.filter((c) => c.lat && c.lng);
+  }, [filteredCouriers]);
 
   const handleSelectCourier = (courier) => {
     setSelectedCourier(courier);
@@ -93,11 +121,10 @@ const LiveMap = () => {
 
   return (
     <div className="h-[calc(100vh-6rem)] flex flex-col space-y-4">
-      {/* Header Desktop Only */}
       <div className="flex-none hidden md:block">
         <PageHeader
           title="Live Tracking Armada"
-          subtitle="Pemantauan lokasi kurir secara real-time."
+          subtitle="Pemantauan lokasi kurir secara real-time via WhatsApp Live Location."
           icon={FiMap}
         />
       </div>
@@ -109,20 +136,17 @@ const LiveMap = () => {
           </div>
         ) : (
           <>
-            {/* MAP Component */}
-            {/* Kita kirim filteredCouriers ke Map agar marker ikut terfilter */}
+            {/* Map hanya menerima marker yang valid */}
             <CourierMap
-              couriers={filteredCouriers}
+              couriers={mapMarkers}
               selectedCourier={selectedCourier}
               onMarkerClick={handleSelectCourier}
             />
-
-            {/* OVERLAY Component */}
+            {/* List Overlay menerima SEMUA data (termasuk yang lokasi null) */}
             <CourierListOverlay
-              couriers={filteredCouriers} // Kirim data yang sudah difilter
+              couriers={filteredCouriers}
               selectedId={selectedCourier?.id}
               onSelect={handleSelectCourier}
-              // Search Input Control
               searchTerm={searchTerm}
               onSearchChange={setSearchTerm}
               onRefresh={handleManualRefresh}

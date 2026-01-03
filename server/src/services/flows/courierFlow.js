@@ -32,6 +32,39 @@ const getDashboardReply = (courier) => {
   );
 };
 
+// Handle Update Lokasi dari Kurir (Live Location WhatsApp)
+export const handleCourierLocation = async (courier, lat, lng, io) => {
+  try {
+    // 1. Update Database (Agar data tersimpan permanen)
+    await courier.update({
+      current_latitude: lat,
+      current_longitude: lng,
+      last_active_at: new Date(),
+    });
+
+    console.log(`📍 DB Updated: ${courier.name} -> [${lat}, ${lng}]`);
+
+    // 2. Emit ke Socket.io (Agar Live Map bergerak real-time)
+    if (io) {
+      io.emit("courier-location-update", {
+        id: courier.id,
+        name: courier.name,
+        phone: courier.phone,
+        lat: parseFloat(lat),
+        lng: parseFloat(lng),
+        status: courier.status,
+        updatedAt: new Date(),
+      });
+      // console.log("📡 Socket Emitted Location Update");
+    }
+
+    return true;
+  } catch (error) {
+    console.error("❌ Error saving courier location:", error);
+    return false;
+  }
+};
+
 // FINALISASI TAGIHAN
 const executeBillFinalization = async (courierId, orderId) => {
   const order = await orderService.finalizeBill(orderId);
@@ -68,7 +101,9 @@ export const handleCourierMessage = async (
   text,
   mediaUrl,
   rawSenderId = null,
-  rawBase64 = null
+  rawBase64 = null,
+  location,
+  io
 ) => {
   try {
     const upperText = text ? text.toUpperCase().trim() : "";
@@ -95,12 +130,52 @@ export const handleCourierMessage = async (
       }
 
       const targetCourier = await Courier.findOne({ where: { phone: cleanPhone } });
-      if (!targetCourier) return { reply: "❌ *Nomor Tidak Dikenal*\nNomor HP belum terdaftar." };
+      if (!targetCourier)
+        return {
+          reply: "❌ *Nomor Tidak Dikenal*\nNomor HP belum terdaftar, silahkan hubungi admin.",
+        };
 
       await targetCourier.update({ device_id: rawSenderId });
       return {
         reply: `🎉 *SELAMAT DATANG ${targetCourier.name}!*\nDevice terhubung. Ketik *#SIAP* untuk mulai.`,
       };
+    }
+
+    // 2. --- HANDLE UPDATE LOKASI (PRIORITAS UTAMA) ---
+    if (location) {
+      try {
+        // Update Database
+        await courier.update({
+          current_latitude: location.latitude,
+          current_longitude: location.longitude,
+          last_active_at: new Date(),
+        });
+
+        // Update Redis (Opsional, untuk caching)
+        // await redisClient.geoAdd("courier_locations", location.longitude, location.latitude, String(courier.id));
+
+        console.log(`DB Updated: ${courier.name} -> [${location.latitude}, ${location.longitude}]`);
+
+        // EMIT KE SOCKET.IO (Agar Peta di Dashboard bergerak!)
+        if (io) {
+          io.emit("courier-location-update", {
+            id: courier.id,
+            name: courier.name,
+            phone: courier.phone,
+            lat: location.latitude,
+            lng: location.longitude,
+            status: courier.status,
+            updatedAt: new Date(),
+          });
+        }
+
+        // Jangan kirim balasan text agar chat WA tidak penuh spam "Lokasi diterima"
+        // Cukup return null, atau reaction jika WAHA support reaction.
+        return { reply: null };
+      } catch (err) {
+        console.error("Gagal update lokasi kurir:", err);
+        return { reply: null };
+      }
     }
 
     if (!courier) {
@@ -255,7 +330,11 @@ export const handleCourierMessage = async (
         return;
       }
 
-      return { reply: `🟢 *STATUS AKTIF*\nSelamat bekerja!\n\n${getDashboardReply(courier)}` };
+      return {
+        reply: `🟢 *STATUS AKTIF*\nSelamat bekerja!\n\n${getDashboardReply(
+          courier
+        )}\n\n📍 *PENTING:* Mohon kirim *Share Live Location* (Lokasi Terkini) selama 8 jam (atau sampai order selesai) sekarang agar order bisa masuk. \n\n(_Note: *Pilih Attachment (Klip) di WA -> Location -> Share Live Location*_)`,
+      };
     } else if (upperText === "#OFF") {
       await courier.update({ status: "OFFLINE" });
       await redisClient.sRem("online_couriers", String(courier.id));

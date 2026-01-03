@@ -1,75 +1,91 @@
 import { Op } from "sequelize";
 import { User, Courier } from "../models/index.js";
 import { handleUserMessage } from "../services/flows/userFlow.js";
-import { handleCourierMessage } from "../services/flows/courierFlow.js";
+import { handleCourierLocation, handleCourierMessage } from "../services/flows/courierFlow.js";
 
 // Helper Sanitasi ID
 const sanitizeId = (id) => {
   if (!id) return "";
-  // Ambil bagian depan sebelum @
   return id.split("@")[0];
 };
 
 export const handleIncomingMessage = async (req, res) => {
   try {
     const data = req.body;
-
-    // Log untuk memastikan data masuk
-    // console.log("📥 Raw Data:", JSON.stringify(data));
+    const io = req.io;
 
     if (!data || !data.from) return res.status(200).json({ status: "ignored" });
 
     // Parsing Identitas
-    const rawSenderId = data.from; // Contoh: "254386768994458@lid"
+    const rawSenderId = data.from;
     const senderIdClean = sanitizeId(rawSenderId);
     const senderName = data.name || "Unknown";
     let messageBody = data.body || "";
 
-    // Parsing Media
-    // JSON N8N mengirim object: { url: "http...", mimetype: "..." }
-    let mediaUrl = null;
+    // --- 1. DETEKSI LOKASI (DEBUG VERSION) ---
+    let isLocationMessage = false;
+    let lat = null;
+    let lng = null;
 
+    // Cek Format 1: data.location (Biasanya pesan attachment lokasi)
+    if (data.location) {
+      lat = parseFloat(data.location.latitude);
+      lng = parseFloat(data.location.longitude);
+      isLocationMessage = true;
+    }
+    // Cek Format 2: data._data (Biasanya Live Location atau raw data WAHA)
+    else if (
+      data._data &&
+      (data._data.type === "location" || data._data.type === "live_location")
+    ) {
+      lat = parseFloat(data._data.lat);
+      lng = parseFloat(data._data.lng);
+      isLocationMessage = true;
+    }
+
+    // --- LOGGING PENTING (Agar kita tahu apa yang terjadi) ---
+    if (isLocationMessage) {
+      console.log(`📍 DETEKSI LOKASI DARI WA: Lat=${lat}, Lng=${lng}`);
+    } else {
+      // Jika Anda mengirim lokasi tapi log ini tidak muncul sebagai "DETEKSI LOKASI",
+      // berarti struktur JSON dari WAHA berbeda.
+      // Uncomment baris di bawah untuk melihat raw data jika masih gagal:
+      // console.log("🔍 RAW BODY:", JSON.stringify(data).substring(0, 200));
+    }
+
+    // PENTING: Jika ini lokasi ATAU body berisi kode gambar base64, kosongkan body text!
+    if (isLocationMessage || messageBody.startsWith("/9j/")) {
+      messageBody = "";
+    }
+
+    // Parsing Media
+    let mediaUrl = null;
     if (data.media && data.media.url) {
       mediaUrl = data.media.url;
     } else if (typeof data.media === "string" && data.media.startsWith("http")) {
-      // jika N8N mengirim string URL langsung
       mediaUrl = data.media;
     }
 
-    // Jika ada gambar tapi body kosong, isi text dummy
-    // Ini yang mengatasi masalah bot diam atau menganggap chat kosong
-    if (mediaUrl && (!messageBody || messageBody === "")) {
-      messageBody = "[IMAGE_RECEIVED]";
-      console.log(`📸 Gambar Diterima: ${mediaUrl}`);
-    }
-
-    // Jika pesan kosong dan tidak ada gambar, abaikan
-    if (!messageBody && !mediaUrl) {
+    // Handle Pesan Kosong
+    if (!messageBody && !mediaUrl && !isLocationMessage) {
       return res.status(200).json({ status: "ignored_empty" });
     }
 
-    console.log(`\n📨 INCOMING: ${senderIdClean} | Body: ${messageBody}`);
-
-    // DATABASE LOOKUP
-    // Cek Kurir (Cari berdasarkan Phone atau Device ID)
+    // --- DATABASE LOOKUP ---
     let courierData = await Courier.findOne({
       where: {
         [Op.or]: [
-          { phone: senderIdClean }, // Jika ID nya 628...
-          { device_id: rawSenderId }, // Jika ID nya 254...@lid
-          { device_id: senderIdClean }, // Fallback ID tanpa @lid
+          { phone: senderIdClean },
+          { device_id: rawSenderId },
+          { device_id: senderIdClean },
         ],
       },
     });
 
-    // Update device_id jika kurir ditemukan via phone
-    // Note: Ini hanya jalan jika "from" adalah nomor HP. Jika "from" @lid, logic ini skip.
     if (courierData && courierData.device_id !== rawSenderId) {
-      // Kita update biar next time lebih cepat
       await courierData.update({ device_id: rawSenderId });
     }
 
-    // Cek User (Jika bukan kurir)
     let userData = null;
     if (!courierData) {
       userData = await User.findOne({
@@ -79,28 +95,36 @@ export const handleIncomingMessage = async (req, res) => {
       });
     }
 
-    // Log status identifikasi
-    if (courierData) console.log(`✅ USER: COURIER (${courierData.name})`);
-    else if (userData) console.log(`✅ USER: CUSTOMER (${userData.name})`);
-    else console.log(`❓ USER: UNKNOWN/GUEST (${rawSenderId})`);
+    // Log Identitas
+    if (courierData) console.log(`👤 COURIER DETECTED: ${courierData.name} (${senderIdClean})`);
+    else if (!isLocationMessage) console.log(`📨 MSG FROM: ${senderIdClean}`);
 
-    // ROUTING FLOW
+    // --- HANDLING KHUSUS LOKASI KURIR ---
+    // Syarat: Pengirim adalah Kurir, Flag Lokasi True, Lat & Lng valid (tidak null/NaN)
+    if (courierData && isLocationMessage && !isNaN(lat) && !isNaN(lng)) {
+      console.log(`🚀 UPDATING LOCATION FOR: ${courierData.name}...`);
+
+      // Panggil fungsi update di courierFlow
+      const updateSuccess = await handleCourierLocation(courierData, lat, lng, io);
+
+      if (updateSuccess) {
+        console.log("✅ LOCATION UPDATE SUCCESS");
+      } else {
+        console.log("❌ LOCATION UPDATE FAILED (Check courierFlow)");
+      }
+
+      return res.status(200).json({ status: "location_processed" });
+    } else if (isLocationMessage && !courierData) {
+      console.log("⚠️ LOKASI DITERIMA TAPI BUKAN KURIR TERDAFTAR.");
+    }
+
+    // --- ROUTING FLOW TEXT/MEDIA ---
     let responsePayload = {};
 
     if (courierData) {
-      // FLOW KURIR
-      // Kirim URL Media agar bisa diproses (upload ke MinIO dll)
-      responsePayload = await handleCourierMessage(
-        courierData,
-        messageBody,
-        mediaUrl, // URL media
-        rawSenderId
-      );
+      responsePayload = await handleCourierMessage(courierData, messageBody, mediaUrl, rawSenderId);
     } else {
-      // FLOW USER
       const upperMsg = messageBody.toString().toUpperCase().trim();
-
-      // Fitur Login Manual
       if (upperMsg.startsWith("#LOGIN")) {
         responsePayload = await handleCourierMessage(null, messageBody, null, rawSenderId);
       } else {

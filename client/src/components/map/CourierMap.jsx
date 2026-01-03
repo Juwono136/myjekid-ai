@@ -2,35 +2,38 @@ import { useEffect } from "react";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { createCustomIcon } from "../../utils/MapIcons";
+import toast from "react-hot-toast";
 
 // Komponen kecil untuk mengupdate view peta saat kurir dipilih
 const MapUpdater = ({ center, zoom }) => {
   const map = useMap();
   useEffect(() => {
-    if (center) {
+    if (center && center[0] != null && center[1] != null) {
       map.flyTo(center, zoom, {
         animate: true,
         duration: 1.5, // Efek terbang yang halus
       });
+    } else {
+      toast.error("Maaf, koordinat tidak valid.");
     }
-  }, [center, zoom, map]);
+  }, [center, zoom, map, toast]);
   return null;
 };
 
 const CourierMap = ({ couriers, selectedCourier, onMarkerClick }) => {
-  // Koordinat Default (Misal: Jakarta/Tangerang)
-  const defaultCenter = [-6.1751, 106.865];
+  // Koordinat Default (Sumbawa besar)
+  const defaultCenter = [-8.504146, 117.428485];
 
   // Tentukan pusat peta: Jika ada yang dipilih, fokus ke dia. Jika tidak, default.
   const mapCenter = selectedCourier ? [selectedCourier.lat, selectedCourier.lng] : defaultCenter;
 
-  const zoomLevel = selectedCourier ? 15 : 11;
+  const zoomLevel = selectedCourier ? 16 : 12;
 
   return (
     <div className="h-full w-full rounded-2xl overflow-hidden shadow-inner border border-gray-200 relative z-0">
       <MapContainer
         center={defaultCenter}
-        zoom={11}
+        zoom={15}
         scrollWheelZoom={true}
         className="h-full w-full"
         zoomControl={false} // Kita bisa buat custom zoom control nanti jika mau
