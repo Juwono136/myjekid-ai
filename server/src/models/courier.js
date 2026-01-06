@@ -33,7 +33,7 @@ const Courier = sequelize.define(
       defaultValue: "OFFLINE",
     },
     current_order_id: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.STRING(50),
       allowNull: true,
     },
 

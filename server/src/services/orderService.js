@@ -1,20 +1,13 @@
-import { Order, Courier, sequelize } from "../models/index.js";
+import { Order, Courier, User, sequelize } from "../models/index.js"; // Pastikan import User
 
 class OrderService {
   /**
    * Membuat Order Baru dari Data Ekstraksi AI
-   * @param {string} userPhone - Nomor HP User
-   * @param {object} aiData - Objek data dari AI { items: [], delivery_address: "" }
    */
   async createFromAI(userPhone, aiData) {
     try {
-      // Gunakan Format timestamp agar unik
       const orderId = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-      // Hitung estimasi total
-      const estimatedTotal = 0;
-
-      // Simpan ke Database
       const newOrder = await Order.create({
         order_id: orderId,
         user_phone: userPhone,
@@ -22,7 +15,7 @@ class OrderService {
         items_summary: aiData.items,
         pickup_address: aiData.pickup_location || "",
         delivery_address: aiData.delivery_address || "",
-        total_amount: estimatedTotal,
+        total_amount: 0,
         status: "DRAFT",
       });
 
@@ -34,38 +27,76 @@ class OrderService {
     }
   }
 
-  // Kurir Mengambil Order
-  async takeOrder(orderId, courierId) {
+  // --- [UPDATE] KURIR MENGAMBIL ORDER ---
+  async takeOrder(orderIdString, courierId) {
     const transaction = await sequelize.transaction();
     try {
+      // [PERBAIKAN KRUSIAL DISINI]
+      // Tambahkan 'required: true' agar menjadi INNER JOIN.
+      // Ini mengatasi error "FOR UPDATE cannot be applied to the nullable side"
       const order = await Order.findOne({
-        where: { order_id: orderId },
-        lock: transaction.LOCK.UPDATE,
+        where: { order_id: orderIdString },
+        include: [
+          {
+            model: User,
+            as: "user",
+            required: true,
+          },
+        ],
         transaction,
+        lock: transaction.LOCK.UPDATE, // Kunci baris agar tidak balapan
       });
 
-      if (!order) throw new Error("Order tidak ditemukan.");
-      if (order.status !== "LOOKING_FOR_DRIVER" && order.status !== "OFFERED") {
-        throw new Error("Order sudah diambil atau dibatalkan.");
+      if (!order) {
+        await transaction.rollback();
+        return { success: false, message: "Order tidak ditemukan." };
       }
 
-      await order.update({ status: "ON_PROCESS", courier_id: courierId }, { transaction });
-      await Courier.update({ status: "BUSY" }, { where: { id: courierId }, transaction });
+      if (order.status !== "LOOKING_FOR_DRIVER") {
+        await transaction.rollback();
+        return { success: false, message: "Yah, Order ini sudah diambil kurir lain! 🐢" };
+      }
+
+      // Update Order
+      await order.update(
+        {
+          status: "ON_PROCESS",
+          courier_id: courierId,
+          taken_at: new Date(),
+        },
+        { transaction }
+      );
+
+      // Update Status Kurir
+      await Courier.update(
+        {
+          status: "BUSY",
+          current_order_id: orderIdString,
+        },
+        { where: { id: courierId }, transaction }
+      );
 
       await transaction.commit();
+
+      // Return Data Sukses
       return { success: true, data: order };
     } catch (error) {
       await transaction.rollback();
-      return { success: false, message: error.message };
+      console.error("❌ Take Order Error:", error); // Debugging
+      return { success: false, message: "Sistem sedang sibuk, coba sesaat lagi." };
     }
   }
 
-  // Simpan Draft Tagihan (Hasil AI atau Edit Manual)
-  async saveBillDraft(orderId, amount, imageUrl = null) {
-    const updateData = { total_amount: amount, status: "BILL_VALIDATION" };
-    if (imageUrl) updateData.invoice_image_url = imageUrl;
-
-    return await Order.update(updateData, { where: { order_id: orderId } });
+  // Simpan Draft Scan Tagihan (Sementara)
+  async saveBillDraft(orderId, total, imageUrl) {
+    return await Order.update(
+      {
+        total_amount: total,
+        invoice_image_url: imageUrl,
+        status: "BILL_VALIDATION",
+      },
+      { where: { order_id: orderId } }
+    );
   }
 
   // Finalisasi Tagihan (Siap dikirim ke User)
@@ -74,19 +105,19 @@ class OrderService {
     try {
       const order = await Order.findOne({ where: { order_id: orderId }, transaction });
 
-      if (order.status !== "BILL_VALIDATION") return null; // Sudah diproses/batal
+      if (order.status !== "BILL_VALIDATION") return null;
 
       await order.update({ status: "BILL_SENT" }, { transaction });
 
       await transaction.commit();
-      return order; // Return data order untuk dikirim ke messageService
+      return order; // Return order agar Flow bisa kirim pesan ke user
     } catch (error) {
       await transaction.rollback();
       return null;
     }
   }
 
-  // 4. Selesaikan Order
+  // Selesaikan Order
   async completeOrder(orderId, courierId) {
     const transaction = await sequelize.transaction();
     try {
@@ -96,15 +127,16 @@ class OrderService {
       );
 
       await Courier.update(
-        { status: "IDLE", last_job_time: new Date() },
+        { status: "IDLE", last_job_time: new Date(), current_order_id: null },
         { where: { id: courierId }, transaction }
       );
 
       await transaction.commit();
-      return { success: true };
+      return true;
     } catch (error) {
       await transaction.rollback();
-      return { success: false, message: error.message };
+      console.error("Complete Order Error:", error);
+      return false;
     }
   }
 }

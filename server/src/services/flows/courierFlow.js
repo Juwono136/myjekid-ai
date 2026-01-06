@@ -2,12 +2,13 @@ import { Op } from "sequelize";
 import { redisClient } from "../../config/redisClient.js";
 import { orderService } from "../orderService.js";
 import { messageService } from "../messageService.js";
-import { Order, Courier } from "../../models/index.js";
+import { Order, Courier, User } from "../../models/index.js";
 import { aiService } from "../ai/AIService.js";
 import { dispatchService } from "../dispatchService.js";
 import { sanitizePhoneNumber } from "../../utils/formatter.js";
 import { storageService } from "../storageService.js";
 
+// --- HELPERS ---
 const toIDR = (num) =>
   new Intl.NumberFormat("id-ID", {
     style: "currency",
@@ -15,27 +16,114 @@ const toIDR = (num) =>
     minimumFractionDigits: 0,
   }).format(num);
 
+const BASE_IMAGE_URL =
+  `${process.env.BASE_IMAGE_URL}/${process.env.S3_BUCKET_NAME}` || "http://localhost:3000/uploads";
+
 const getDashboardReply = (courier) => {
   const statusIcon = courier.status === "IDLE" ? "🟢" : courier.status === "BUSY" ? "🔴" : "⚫";
+  const locStatus = courier.current_latitude ? "📍 Terkonfirmasi" : "⚠️ Belum ada lokasi";
 
   return (
     `🏢 *DASHBOARD KURIR MYJEK*\n` +
     `━━━━━━━━━━━━━━━━━━━\n` +
     `👤 Nama : ${courier.name}\n` +
     `📡 Status : ${statusIcon} *${courier.status}*\n` +
+    `🗺️ Posisi : ${locStatus}\n` +
     `━━━━━━━━━━━━━━━━━━━\n\n` +
     `*Menu Perintah:*\n` +
-    `▶️ *#SIAP* : Aktifkan Akun (On-Bid)\n` +
-    `⏸️ *#OFF* : Matikan Akun (Istirahat)\n` +
+    `▶️ *#SIAP* : Aktifkan Akun Untuk Menerima Order\n` +
+    `⏸️ *#OFF* : Matikan Akun (Istirahat/Offline)\n` +
     `➡️ *#INFO* : Cek Status Kurir Saat ini\n\n` +
+    `*PENTING:* Aktifkan lokasi terkini kamu dengan cara: 👉 Klik tombol *Clip (📎)* di WA -> Pilih *Location* -> *Send Your Current Location* untuk mendapatkan order. \n\n` +
     `_Tetap semangat & hati-hati di jalan!_ 💪`
   );
 };
 
-// Handle Update Lokasi dari Kurir (Live Location WhatsApp)
+// --- FINALISASI TAGIHAN ---
+const executeBillFinalization = async (courier, orderId) => {
+  try {
+    console.log(`🏁 Finalizing Order: ${orderId} by Courier: ${courier.name}`);
+
+    // 1. Finalisasi via Service (Memindahkan Draft -> Real Data di DB)
+    // Ini memastikan 'invoice_image_url' dan 'total_amount' terupdate di DB
+    const order = await orderService.finalizeBill(orderId);
+
+    if (!order) {
+      console.error("❌ Gagal finalize bill: Order not found.");
+      return { reply: "❌ Gagal memproses data tagihan. Order tidak ditemukan." };
+    }
+
+    // 2. Fetch User Manual (Anti-Crash Logic)
+    // Kita ambil data user berdasarkan user_phone karena di tabel orders kamu relasinya via phone
+    // (Berdasarkan file webhookController.js kamu sebelumnya, user dicari by phone)
+    let user = await User.findOne({ where: { phone: order.user_phone } });
+
+    // Fallback: Coba cari via user_id jika ada (untuk jaga-jaga)
+    if (!user && order.user_id) {
+      user = await User.findByPk(order.user_id);
+    }
+
+    if (!user) {
+      console.error(`❌ CRITICAL: User dengan HP ${order.user_phone} tidak ditemukan.`);
+      return { reply: "⚠️ Order tersimpan, tapi data User hilang. Tidak bisa kirim notif." };
+    }
+
+    // 3. Hitung Total Final (Sesuai Kolom DB: total_amount)
+    const finalTotal = parseFloat(order.total_amount || 0);
+
+    // 4. Update Status Order
+    // Karena kolomnya hanya status
+    await order.update({
+      status: "BILL_SENT",
+    });
+
+    // 5. Siapkan URL Gambar untuk N8N
+    // Pastikan BASE_IMAGE_URL mengarah ke MinIO Localhost/IP Docker
+    let imageUrl = order.invoice_image_url;
+    // Jika di DB cuma nama file (cth: invoice_123.jpg), gabungkan dengan Base URL
+    if (imageUrl && !imageUrl.startsWith("http")) {
+      imageUrl = `${BASE_IMAGE_URL}/${imageUrl}`;
+    }
+
+    // 6. Pesan Caption untuk User (Disederhanakan)
+    const userCaption =
+      `✅ *ORDER SELESAI DIBELANJAKAN!*\n` +
+      `Halo Kak ${user.name}, pesanan sudah dibeli oleh kurir bernama ${courier.name}.\n\n` +
+      `💰 *TOTAL TAGIHAN: ${toIDR(finalTotal)}*\n` +
+      `_(Sudah termasuk harga barang, ongkos kirim dan jasa titip)_\n\n` +
+      `Mohon siapkan uang pas ya Kak. Driver segera meluncur! 🛵\n` +
+      `📸 *LINK FOTO STRUK/NOTA TERLAMPIR DIBAWAH INI 👇*`;
+
+    // 7. Kirim Notifikasi ke Kurir (Direct Message)
+    const courierMsg =
+      `✅ *TAGIHAN TERKONFIRMASI!*\n` +
+      `Nominal: ${toIDR(finalTotal)}\n\n` +
+      `Foto struk sedang dikirim otomatis ke Customer...\n` +
+      `👉 Silakan antar pesanan ke: ${order.delivery_address}\n\n` +
+      `Ketik *#SELESAI* nanti jika barang sudah diterima customer.`;
+
+    await messageService.sendMessage(courier.phone, courierMsg);
+
+    // 8. Return Action ke Controller (Untuk Trigger N8N Kirim Gambar ke User)
+    // Ini kuncinya agar Chatbot yang kirim gambar, bukan Kurir manual.
+    return {
+      action: "trigger_n8n_image",
+      data: {
+        to: user.phone,
+        url: imageUrl,
+        caption: userCaption,
+      },
+    };
+  } catch (error) {
+    console.error("❌ Error CRITICAL di executeBillFinalization:", error);
+    return { reply: "❌ Terjadi kesalahan sistem saat finalisasi." };
+  }
+};
+
+// --- HANDLE UPDATE LOKASI (Function Standalone) ---
 export const handleCourierLocation = async (courier, lat, lng, io) => {
   try {
-    // 1. Update Database (Agar data tersimpan permanen)
+    // 1. Update Database
     await courier.update({
       current_latitude: lat,
       current_longitude: lng,
@@ -44,7 +132,7 @@ export const handleCourierLocation = async (courier, lat, lng, io) => {
 
     console.log(`📍 DB Updated: ${courier.name} -> [${lat}, ${lng}]`);
 
-    // 2. Emit ke Socket.io (Agar Live Map bergerak real-time)
+    // 2. Emit ke Socket.io (Untuk Live Map)
     if (io) {
       io.emit("courier-location-update", {
         id: courier.id,
@@ -55,9 +143,7 @@ export const handleCourierLocation = async (courier, lat, lng, io) => {
         status: courier.status,
         updatedAt: new Date(),
       });
-      // console.log("📡 Socket Emitted Location Update");
     }
-
     return true;
   } catch (error) {
     console.error("❌ Error saving courier location:", error);
@@ -65,47 +151,39 @@ export const handleCourierLocation = async (courier, lat, lng, io) => {
   }
 };
 
-// FINALISASI TAGIHAN
-const executeBillFinalization = async (courierId, orderId) => {
-  const order = await orderService.finalizeBill(orderId);
-  if (!order) return null;
-
-  // Notifikasi ke Customer (TEXT ONLY - Agar Aman & Profesional)
-  // Informasikan bahwa nota akan dikirim manual oleh driver
-  const captionUser =
-    `Halo Kak! 👋\n` +
-    `Belanjaan sudah selesai dibeli.\n\n` +
-    `💰 Total Tagihan Final: *${toIDR(order.total_amount)}*\n` +
-    `_(Sudah termasuk ongkir & jasa titip)_\n\n` +
-    `📸 *INFO PENTING:*\n` +
-    `Driver kami akan mengirimkan *FOTO NOTA ASLI* melalui Personal Chat (WA Pribadi) ke nomor kakak sebentar lagi. Mohon diperiksa ya.\n\n` +
-    `Mohon siapkan uang pas, Driver segera meluncur! 🛵`;
-
-  // Gunakan sendMessage (Text), bukan sendImage agar stabil
-  await messageService.sendMessage(order.user_phone, captionUser);
-
-  // Balasan ke Kurir (Instruksi Manual)
-  return (
-    `✅ *TAGIHAN TERKONFIRMASI!*\n` +
-    `Nominal: ${toIDR(order.total_amount)}\n\n` +
-    `⚠️ *TUGAS WAJIB SEKARANG:*\n` +
-    `1. *Chat WA Manual* ke Customer sekarang.\n` +
-    `2. *Kirim FOTO STRUK/NOTA* belanjaan ke mereka sebagai bukti sah.\n` +
-    `3. Antar pesanan ke: *${order.delivery_address}*\n\n` +
-    `👉 Ketik *#SELESAI* jika barang sudah diterima customer.`
-  );
-};
-
+// --- MAIN HANDLER ---
 export const handleCourierMessage = async (
   courier,
   text,
-  mediaUrl,
+  mediaUrl = null,
   rawSenderId = null,
   rawBase64 = null,
-  location,
-  io
+  locationArg = null, // Argumen lokasi eksplisit
+  io = null
 ) => {
   try {
+    // ============================================================
+    // 1. COMPATIBILITY FIX (HANDLE PARAMETER CHANGE)
+    // ============================================================
+    let location = locationArg;
+
+    // Cek apakah argumen ke-3 adalah object lokasi (bukan URL string)
+    if (mediaUrl && typeof mediaUrl === "object") {
+      // FORMAT A: { latitude: -6.2, longitude: 106.8 } (Clean Object)
+      if (mediaUrl.latitude) {
+        location = mediaUrl;
+        mediaUrl = null;
+      }
+      // FORMAT B: { lat: -6.2, lng: 106.8 } (Format WAHA/N8N umum)
+      else if (mediaUrl.lat || (mediaUrl._data && mediaUrl._data.lat)) {
+        location = {
+          latitude: mediaUrl.lat || mediaUrl._data.lat,
+          longitude: mediaUrl.lng || mediaUrl._data.lng,
+        };
+        mediaUrl = null;
+      }
+    }
+
     const upperText = text ? text.toUpperCase().trim() : "";
 
     console.log(
@@ -115,7 +193,19 @@ export const handleCourierMessage = async (
       )}...`
     );
 
-    // LOGIN
+    // ============================================================
+    // 2. DEFENSIVE CODING
+    // ============================================================
+    if (upperText === "#TEST KURIR") {
+      return { reply: "🛠️ *MODE TESTING AKTIF*\nAnda sekarang dalam simulasi sebagai Kurir." };
+    }
+    if (upperText === "#TEST USER") {
+      return { reply: "🛠️ Silakan ketik perintah user." };
+    }
+
+    // ============================================================
+    // A. LOGIN FLOW
+    // ============================================================
     if (upperText.startsWith("#LOGIN")) {
       const inputPhone = upperText.split(" ")[1];
       if (!inputPhone) return { reply: "⚠️ *Format Salah*\nContoh: `#LOGIN 08123456789`" };
@@ -141,94 +231,87 @@ export const handleCourierMessage = async (
       };
     }
 
-    // 2. --- HANDLE UPDATE LOKASI (PRIORITAS UTAMA) ---
-    if (location) {
-      try {
-        // Update Database
-        await courier.update({
-          current_latitude: location.latitude,
-          current_longitude: location.longitude,
-          last_active_at: new Date(),
-        });
+    // ============================================================
+    // B. LOCATION UPDATE HANDLER (PRIORITAS UTAMA)
+    // ============================================================
+    if (location && location.latitude && !isNaN(parseFloat(location.latitude))) {
+      // Panggil helper update DB & Socket
+      await handleCourierLocation(courier, location.latitude, location.longitude, io);
 
-        // Update Redis (Opsional, untuk caching)
-        // await redisClient.geoAdd("courier_locations", location.longitude, location.latitude, String(courier.id));
-
-        console.log(`DB Updated: ${courier.name} -> [${location.latitude}, ${location.longitude}]`);
-
-        // EMIT KE SOCKET.IO (Agar Peta di Dashboard bergerak!)
-        if (io) {
-          io.emit("courier-location-update", {
-            id: courier.id,
-            name: courier.name,
-            phone: courier.phone,
-            lat: location.latitude,
-            lng: location.longitude,
-            status: courier.status,
-            updatedAt: new Date(),
-          });
-        }
-
-        // Jangan kirim balasan text agar chat WA tidak penuh spam "Lokasi diterima"
-        // Cukup return null, atau reaction jika WAHA support reaction.
-        return { reply: null };
-      } catch (err) {
-        console.error("Gagal update lokasi kurir:", err);
-        return { reply: null };
-      }
+      // Balasan Khusus Kurir
+      return {
+        reply: `✅ *POSISI TERUPDATE!*\n\nLokasi Anda telah tersimpan di sistem admin.\nStatus: *${
+          courier?.status || "Aktif"
+        }*\n\n*PENTING*: Selalu Update lokasi terakhir kamu kepada saya saat sedang sedang aktif (IDLE) ataupun saat menjalankan order pelanggan. Terima kasih 👍`,
+      };
     }
 
     if (!courier) {
       return { reply: "👋 Silakan Login: ketik\n*#LOGIN <NOMOR_HP_ANDA>*" };
     }
 
-    // ACTIVE ORDER FLOW
+    // ============================================================
+    // C. ACTIVE ORDER FLOW (ON_PROCESS / SCAN STRUK)
+    // ============================================================
     const activeOrder = await Order.findOne({
       where: {
         courier_id: courier.id,
         status: { [Op.in]: ["ON_PROCESS", "BILL_VALIDATION", "BILL_SENT"] },
       },
+      include: [{ model: Courier, as: "courier" }],
     });
 
     if (activeOrder) {
-      // FASE BELANJA (ON_PROCESS)
+      // 1. FASE BELANJA (ON_PROCESS)
       if (activeOrder.status === "ON_PROCESS") {
-        // JIKA INPUT GAMBAR (URL / Base64)
         if (mediaUrl || rawBase64) {
-          // Respon cepat agar tidak timeout (Return NULL ke N8N agar koneksi putus)
-          // Kirim pesan proses via messageService
           await messageService.sendMessage(
             courier.phone,
             "⏳ *Sedang Scan Struk...*\nSistem sedang menyimpan bukti & scan harga..."
           );
 
-          // PROSES BACKGROUND (ASYNC)
           (async () => {
             try {
               const fileName = `invoice_${activeOrder.order_id}_${Date.now()}.jpg`;
+              const imageInput = mediaUrl || rawBase64;
+              let storedFileName;
 
-              const storedFileName = await storageService.uploadFileFromUrl(
-                mediaUrl || rawBase64, // URL/Source
-                fileName // Nama File Tujuan
-              );
+              // [STEP 1] UPLOAD KE MINIO (Wajib untuk arsip)
+              if (typeof imageInput === "string" && imageInput.startsWith("http")) {
+                storedFileName = await storageService.uploadFileFromUrl(imageInput, fileName);
+              } else {
+                storedFileName = await storageService.uploadBase64(imageInput, fileName);
+              }
 
               if (!storedFileName) throw new Error("Gagal simpan ke MinIO");
+              console.log(`✅ Upload MinIO Sukses: ${storedFileName}`);
 
-              let cleanBase64 = rawBase64
-                ? rawBase64.replace(/^data:image\/\w+;base64,/, "")
-                : null;
+              // [STEP 2] BYPASS URL ISSUE -> DOWNLOAD BASE64 DARI MINIO
+              // Kita ambil balik datanya agar AI tidak perlu akses URL localhost
+              const rawBase64 = await storageService.downloadFileAsBase64(storedFileName);
+
+              if (!rawBase64) throw new Error("Gagal download Base64 dari MinIO (Data Kosong)");
+
+              // [STEP 3] FORMATTING & SEND TO AI
+              // PENTING: Tambahkan prefix agar dikenali sebagai valid Image Data URI
+              const formattedBase64 = `data:image/jpeg;base64,${rawBase64}`;
+
+              console.log(`🤖 AI Processing: Mengirim Base64 (Length: ${rawBase64.length})`);
+
+              // Coba kirim dengan prefix (formattedBase64)
+              // Jika AI Service Anda menolak prefix, ganti variabel di bawah ini menjadi 'rawBase64'
               const aiResult = await aiService.readInvoice(
-                cleanBase64 || mediaUrl,
+                formattedBase64,
                 activeOrder.items_summary
               );
 
               const detectedTotal =
                 typeof aiResult === "object" ? aiResult.total : parseInt(aiResult) || 0;
 
-              // Simpan Draft (File Name tersimpan di DB, tapi tidak dikirim otomatis ke user)
+              // Simpan Draft
               await orderService.saveBillDraft(activeOrder.order_id, detectedTotal, storedFileName);
 
-              // Auto-Confirm (3 Menit)
+              // Auto-Confirm Logic
               setTimeout(async () => {
                 const freshOrder = await Order.findByPk(activeOrder.order_id);
                 if (
@@ -245,10 +328,9 @@ export const handleCourierMessage = async (
                 }
               }, 3 * 60 * 1000);
 
-              // Kirim Hasil Scan ke Kurir
               const replyText =
                 `🧾 *HASIL SCAN TAGIHAN*\n` +
-                `Sistem membaca: *${toIDR(detectedTotal)}*\n\n` +
+                `Total Tagihan: *${toIDR(detectedTotal)}*\n\n` +
                 `✅ Ketik *Y* / *OK* jika benar.\n` +
                 `✏️ Ketik *Angka* (cth: 50000) jika salah.`;
 
@@ -257,48 +339,49 @@ export const handleCourierMessage = async (
               console.error("❌ Error Background Process:", err);
               await messageService.sendMessage(
                 courier.phone,
-                "❌ *Gagal Scan Gambar*\nGambar kurang jelas atau sistem sibuk. Mohon foto ulang struknya."
+                "❌ *Gagal Scan Gambar*\nSistem tidak dapat membaca gambar tersebut. Mohon ketik manual total tagihannya (Cth: 50000)."
               );
             }
           })();
 
-          // Return null ke Controller agar Webhook 200 OK cepat
           return null;
         }
 
-        // Jika Kurir kirim Teks biasa
         return {
-          reply: "📸 *Status: Belanja*\nKak, silakan kirim **FOTO STRUK/NOTA** belanjaan sekarang.",
+          reply:
+            "📸 *Status: Belanja*\nKak, silakan kirim **FOTO STRUK/NOTA** belanjaan sekarang. Saya akan membantu untuk menghitung total tagihan belanjanya yah..",
         };
       }
 
-      // KONFIRMASI (BILL_VALIDATION)
+      // 2. FASE VALIDASI
       else if (activeOrder.status === "BILL_VALIDATION") {
         const cleanNum = upperText.replace(/[^0-9]/g, "");
         const validYes = ["Y", "YA", "YES", "OK", "OKE", "SIAP", "BENAR"];
 
-        // JIKA CONFIRM "Y"
         if (validYes.includes(upperText)) {
-          // Panggil fungsi finalisasi yang sudah diubah
-          const reply = await executeBillFinalization(courier.id, activeOrder.order_id);
-          return { reply: reply || "⚠️ Gagal memproses data. Coba lagi." };
-        }
-        // JIKA KOREKSI HARGA
-        else if (cleanNum.length > 3 && /^\d+$/.test(cleanNum)) {
+          const n8nImageAction = await executeBillFinalization(courier, activeOrder.order_id);
+
+          if (n8nImageAction && n8nImageAction.action === "trigger_n8n_image") {
+            return n8nImageAction; // Kirim ke webhookController
+          }
+
+          return { reply: "⚠️ Gagal memproses data. Coba lagi." };
+        } else if (cleanNum.length > 3 && /^\d+$/.test(cleanNum)) {
           const newTotal = parseInt(cleanNum);
           await activeOrder.update({ total_amount: newTotal });
           return {
-            reply: `✏️ *Revisi Harga Berhasil*\nTotal Baru: *${toIDR(
+            reply: `✏️ *Revisi Harga Berhasil*\nTotal Tagihan (update): *${toIDR(
               newTotal
             )}*.\n\nKetik *OK* / *Y* jika sudah pas.`,
           };
         }
         return {
-          reply: "⚠️ Ketik *Y* jika benar, atau ketik *Angka Rupiah* untuk revisi.",
+          reply:
+            "⚠️ Ketik *Y* jika benar, atau ketik *Angka (dalam) Rupiah (Cth: 15000)* untuk revisi.",
         };
       }
 
-      // FASE PENGANTARAN (BILL_SENT)
+      // 3. FASE ANTAR
       else if (activeOrder.status === "BILL_SENT") {
         if (upperText === "#SELESAI") {
           await orderService.completeOrder(activeOrder.order_id, courier.id);
@@ -318,12 +401,21 @@ export const handleCourierMessage = async (
       }
     }
 
-    // GLOBAL COMMANDS
+    // ============================================================
+    // D. GLOBAL COMMANDS (#SIAP, #OFF, #AMBIL, #INFO)
+    // ============================================================
     if (upperText === "#SIAP") {
+      // --- [VALIDASI LOKASI WAJIB] ---
+      // Kurir tidak bisa #SIAP jika database belum punya lokasi
+      if (!courier.current_latitude || !courier.current_longitude) {
+        return {
+          reply: `⛔ *AKSES DITOLAK*\n\nAnda belum mengirim lokasi saat ini. Sistem tidak bisa memberi order jika tidak tahu posisi Anda.\n\n👉 Klik tombol *Clip (📎)* di WA -> Pilih *Location* -> *Send Your Current Location*.\n\n_Setelah kirim lokasi, baru ketik #SIAP lagi._`,
+        };
+      }
+
       await courier.update({ status: "IDLE", last_active_at: new Date() });
       await redisClient.sAdd("online_couriers", String(courier.id));
 
-      // Cek Backfill Order
       const pendingOrder = await Order.findOne({ where: { status: "LOOKING_FOR_DRIVER" } });
       if (pendingOrder) {
         await dispatchService.offerOrderToCourier(pendingOrder, courier);
@@ -331,19 +423,62 @@ export const handleCourierMessage = async (
       }
 
       return {
-        reply: `🟢 *STATUS AKTIF*\nSelamat bekerja!\n\n${getDashboardReply(
-          courier
-        )}\n\n📍 *PENTING:* Mohon kirim *Share Live Location* (Lokasi Terkini) selama 8 jam (atau sampai order selesai) sekarang agar order bisa masuk. \n\n(_Note: *Pilih Attachment (Klip) di WA -> Location -> Share Live Location*_)`,
+        reply: `🟢 *STATUS AKTIF*\nSelamat bekerja!\n\n${getDashboardReply(courier)}`,
       };
     } else if (upperText === "#OFF") {
       await courier.update({ status: "OFFLINE" });
       await redisClient.sRem("online_couriers", String(courier.id));
       return { reply: `⛔ *STATUS OFFLINE*\nHati-hati di jalan. 👋` };
     } else if (upperText.startsWith("#AMBIL")) {
+      // --- [VALIDASI LOKASI WAJIB] ---
+      // Double check: Jangan sampai ambil order kalau lokasi hilang
+      if (!courier.current_latitude || !courier.current_longitude) {
+        return {
+          reply: `⛔ *TIDAK BISA AMBIL ORDER*\n\nData lokasi Anda kosong/belum terupdate. Wajib kirim *Share Location (📎)* sekarang agar bisa mengambil order ini!`,
+        };
+      }
+
       const orderId = upperText.split(" ")[1];
       const result = await orderService.takeOrder(orderId, courier.id);
       if (!result.success) return { reply: `❌ ${result.message}` };
-      return { reply: `🚀 *ORDER DIAMBIL!*\nLokasi: ${result.data.pickup_address}` };
+
+      const orderData = result.data;
+      const userData = orderData.user;
+
+      const custName = userData ? userData.name : "Pelanggan";
+      const custPhone = userData ? userData.phone : orderData.user_phone;
+
+      const detailMsg =
+        `🚀 *ORDER BERHASIL DIAMBIL!*\n\n` +
+        `👤 *Nama Pelanggan:* ${custName}\n` +
+        `📱 *No. WA:* ${custPhone}\n\n` +
+        `📍 *Antar ke:* ${orderData.delivery_address}\n` +
+        `📍 *Ambil di (pickup):* ${orderData.pickup_address}\n` +
+        `📦 *Item:* \n${orderData.items_summary
+          .map((i) => `- ${i.item || "Menu"} (x${i.qty || 1})${i.note ? ` - ${i.note}` : ""}`)
+          .join(", ")}\n\n` +
+        `_Silakan menuju lokasi pengantaran pada lokasi yang sudah diberikan 👇._\n` +
+        `*PENTING*: Selalu Update lokasi terkini kamu kepada saya saat sedang sedang aktif (IDLE) ataupun saat menjalankan order pelanggan. Terima kasih 👍`;
+
+      await messageService.sendMessage(courier.phone, detailMsg);
+
+      // Return Object Location untuk n8n
+      if (userData && userData.latitude && userData.longitude) {
+        return {
+          type: "location",
+          latitude: parseFloat(userData.latitude),
+          longitude: parseFloat(userData.longitude),
+          address: orderData.delivery_address,
+          reply: "",
+        };
+      } else {
+        // Fallback jika user tidak punya koordinat
+        return {
+          reply:
+            detailMsg +
+            "\n\n*PENTING:* Koordinat User tidak tersedia. Mohon chat user untuk minta Share Location.",
+        };
+      }
     } else if (["#INFO", "MENU", "PING"].includes(upperText)) {
       return { reply: getDashboardReply(courier) };
     }
@@ -352,9 +487,9 @@ export const handleCourierMessage = async (
       reply: `🤖 *Bot System*\nPerintah tidak dikenal. Ketik *#INFO*.`,
     };
   } catch (error) {
-    console.error("❌ CRITICAL ERROR di CourierFlow:", error);
+    console.error("❌ CRITICAL ERROR:", error);
     return {
-      reply: "⚠️ *Sistem Gangguan*\nMohon coba lagi sebentar lagi.",
+      reply: "⚠️ *Sistem Gangguan*\nMohon coba sebentar lagi.",
     };
   }
 };

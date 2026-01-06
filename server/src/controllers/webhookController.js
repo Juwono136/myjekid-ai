@@ -1,145 +1,273 @@
 import { Op } from "sequelize";
 import { User, Courier } from "../models/index.js";
 import { handleUserMessage } from "../services/flows/userFlow.js";
-import { handleCourierLocation, handleCourierMessage } from "../services/flows/courierFlow.js";
+import { handleCourierMessage } from "../services/flows/courierFlow.js";
+import { redisClient } from "../config/redisClient.js";
+import { sanitizePhoneNumber } from "../utils/formatter.js";
 
-// Helper Sanitasi ID
-const sanitizeId = (id) => {
-  if (!id) return "";
-  return id.split("@")[0];
+// --- HELPERS ---
+const sanitizeId = (id) => (id ? id.split("@")[0] : "");
+
+// --- STANDARD N8N RESPONSE (TEXT) ---
+const createN8nResponse = (to, body) => {
+  return {
+    action: "reply_text",
+    data: { to: to, body: body },
+  };
+};
+
+// --- N8N RESPONSE (LOCATION) ---
+const createN8nLocationResponse = (to, lat, long, address, reply) => {
+  return {
+    action: "reply_location", // Kunci untuk Switch Node di n8n
+    data: {
+      to: to,
+      latitude: lat,
+      longitude: long,
+      address: address,
+      title: "Lokasi", // Default title
+      reply: reply || "", // Pesan teks pendamping (jika n8n support)
+    },
+  };
+};
+
+// --- [BARU] N8N RESPONSE (IMAGE) ---
+// Digunakan saat bot ingin mengirim foto struk ke User
+const createN8nImageResponse = (to, url, caption) => {
+  return {
+    action: "reply_image", // Pastikan di N8N Action Router diarahkan ke Node Image
+    data: {
+      to: to,
+      url: url,
+      caption: caption,
+    },
+  };
 };
 
 export const handleIncomingMessage = async (req, res) => {
   try {
     const data = req.body;
-    const io = req.io;
 
-    if (!data || !data.from) return res.status(200).json({ status: "ignored" });
+    // 1. VALIDASI PAYLOAD
+    const payload = data.payload || data;
+    if (!payload || !payload.from) return res.status(200).json({ status: "ignored_empty" });
+    if (payload.fromMe) return res.status(200).json({ status: "ignored_self" });
 
-    // Parsing Identitas
-    const rawSenderId = data.from;
+    // --- FILTER TIPE PESAN (SAFETY GATE) ---
+    const messageType = payload._data?.type || payload.type || "chat";
+    const allowedTypes = ["chat", "location", "image"];
+
+    if (!allowedTypes.includes(messageType)) {
+      console.log(`⚠️ Ignored unsupported message type: ${messageType}`);
+      return res
+        .status(200)
+        .json(
+          createN8nResponse(
+            payload.from,
+            "🙏 Maaf, bot saat ini hanya menerima Pesan Teks, Lokasi, dan Foto."
+          )
+        );
+    }
+
+    // 2. PARSING DATA DASAR
+    const rawSenderId = payload.from;
     const senderIdClean = sanitizeId(rawSenderId);
-    const senderName = data.name || "Unknown";
-    let messageBody = data.body || "";
+    const senderName = payload.pushname || payload._data?.notifyName || "Customer";
 
-    // --- 1. DETEKSI LOKASI (DEBUG VERSION) ---
-    let isLocationMessage = false;
-    let lat = null;
-    let lng = null;
+    // Deteksi Isi Pesan
+    let messageBody = "";
+    let locationData = null;
+    let mediaData = null; // Untuk menyimpan URL/Base64 Gambar
 
-    // Cek Format 1: data.location (Biasanya pesan attachment lokasi)
-    if (data.location) {
-      lat = parseFloat(data.location.latitude);
-      lng = parseFloat(data.location.longitude);
-      isLocationMessage = true;
-    }
-    // Cek Format 2: data._data (Biasanya Live Location atau raw data WAHA)
-    else if (
-      data._data &&
-      (data._data.type === "location" || data._data.type === "live_location")
-    ) {
-      lat = parseFloat(data._data.lat);
-      lng = parseFloat(data._data.lng);
-      isLocationMessage = true;
-    }
+    if (messageType === "chat") {
+      messageBody = payload.body || "";
+    } else if (messageType === "location") {
+      locationData = {
+        latitude: payload.lat || payload._data?.lat,
+        longitude: payload.lng || payload._data?.lng,
+        address: payload.body || payload._data?.loc,
+      };
+      messageBody = "SHARE_LOCATION_EVENT";
+    } else if (messageType === "image") {
+      messageBody = payload.caption || "";
 
-    // --- LOGGING PENTING (Agar kita tahu apa yang terjadi) ---
-    if (isLocationMessage) {
-      console.log(`📍 DETEKSI LOKASI DARI WA: Lat=${lat}, Lng=${lng}`);
-    } else {
-      // Jika Anda mengirim lokasi tapi log ini tidak muncul sebagai "DETEKSI LOKASI",
-      // berarti struktur JSON dari WAHA berbeda.
-      // Uncomment baris di bawah untuk melihat raw data jika masih gagal:
-      // console.log("🔍 RAW BODY:", JSON.stringify(data).substring(0, 200));
-    }
+      // --- PERBAIKAN LOGIKA PENGAMBILAN GAMBAR ---
+      // Prioritas 1: Ambil URL High-Res (biasanya ada di payload.media.url, payload.mediaUrl, atau _data.mediaUrl)
+      // Prioritas 2: Ambil body (Hati-hati, ini seringkali cuma thumbnail)
 
-    // PENTING: Jika ini lokasi ATAU body berisi kode gambar base64, kosongkan body text!
-    if (isLocationMessage || messageBody.startsWith("/9j/")) {
-      messageBody = "";
+      // Cek variasi struktur payload WAHA/n8n untuk URL
+      const highResUrl =
+        payload.media?.url || payload.mediaUrl || payload._data?.mediaUrl || payload.url;
+      const thumbnailBase64 = payload.body || payload._data?.body;
+
+      if (highResUrl) {
+        console.log("📸 Webhook: Mendeteksi Image URL (High Res).");
+        mediaData = highResUrl;
+      } else {
+        console.log("📸 Webhook: Mendeteksi Base64 Body (Mungkin Low Res/Thumbnail).");
+        mediaData = thumbnailBase64;
+      }
     }
 
-    // Parsing Media
-    let mediaUrl = null;
-    if (data.media && data.media.url) {
-      mediaUrl = data.media.url;
-    } else if (typeof data.media === "string" && data.media.startsWith("http")) {
-      mediaUrl = data.media;
-    }
+    const upperBody = messageBody.toUpperCase().trim();
+    let n8nResponse = null;
 
-    // Handle Pesan Kosong
-    if (!messageBody && !mediaUrl && !isLocationMessage) {
-      return res.status(200).json({ status: "ignored_empty" });
-    }
+    // ============================================================
+    // LOGIC 1: CEK MODE TESTING (REDIS)
+    // ============================================================
+    const testModeKey = `test_mode:${senderIdClean}`;
+    const testMode = await redisClient.get(testModeKey); // "USER" atau "COURIER"
 
-    // --- DATABASE LOOKUP ---
-    let courierData = await Courier.findOne({
+    // ============================================================
+    // LOGIC 2: IDENTIFIKASI PERAN
+    // ============================================================
+    let courier = await Courier.findOne({
       where: {
-        [Op.or]: [
-          { phone: senderIdClean },
-          { device_id: rawSenderId },
-          { device_id: senderIdClean },
-        ],
+        [Op.or]: [{ phone: senderIdClean }, { device_id: rawSenderId }],
       },
     });
 
-    if (courierData && courierData.device_id !== rawSenderId) {
-      await courierData.update({ device_id: rawSenderId });
-    }
-
-    let userData = null;
-    if (!courierData) {
-      userData = await User.findOne({
-        where: {
-          [Op.or]: [{ phone: senderIdClean }, { device_id: rawSenderId }],
-        },
-      });
-    }
-
-    // Log Identitas
-    if (courierData) console.log(`👤 COURIER DETECTED: ${courierData.name} (${senderIdClean})`);
-    else if (!isLocationMessage) console.log(`📨 MSG FROM: ${senderIdClean}`);
-
-    // --- HANDLING KHUSUS LOKASI KURIR ---
-    // Syarat: Pengirim adalah Kurir, Flag Lokasi True, Lat & Lng valid (tidak null/NaN)
-    if (courierData && isLocationMessage && !isNaN(lat) && !isNaN(lng)) {
-      console.log(`🚀 UPDATING LOCATION FOR: ${courierData.name}...`);
-
-      // Panggil fungsi update di courierFlow
-      const updateSuccess = await handleCourierLocation(courierData, lat, lng, io);
-
-      if (updateSuccess) {
-        console.log("✅ LOCATION UPDATE SUCCESS");
-      } else {
-        console.log("❌ LOCATION UPDATE FAILED (Check courierFlow)");
-      }
-
-      return res.status(200).json({ status: "location_processed" });
-    } else if (isLocationMessage && !courierData) {
-      console.log("⚠️ LOKASI DITERIMA TAPI BUKAN KURIR TERDAFTAR.");
-    }
-
-    // --- ROUTING FLOW TEXT/MEDIA ---
-    let responsePayload = {};
-
-    if (courierData) {
-      responsePayload = await handleCourierMessage(courierData, messageBody, mediaUrl, rawSenderId);
+    let isActingAsCourier = false;
+    if (courier) {
+      if (testMode === "USER") isActingAsCourier = false;
+      else isActingAsCourier = true;
     } else {
-      const upperMsg = messageBody.toString().toUpperCase().trim();
-      if (upperMsg.startsWith("#LOGIN")) {
-        responsePayload = await handleCourierMessage(null, messageBody, null, rawSenderId);
-      } else {
-        responsePayload = await handleUserMessage(
-          senderIdClean,
-          senderName,
-          messageBody,
-          rawSenderId
+      if (testMode === "COURIER") isActingAsCourier = true;
+    }
+
+    // ============================================================
+    // LOGIC 3: ROUTING FLOW
+    // ============================================================
+
+    if (isActingAsCourier) {
+      // --- A. FLOW KURIR ---
+
+      // 1. Cek Mode Test
+      if (upperBody === "#TEST USER") {
+        await redisClient.set(testModeKey, "USER");
+        return res.json(createN8nResponse(rawSenderId, "🛠️ MODE TESTING: AKTIF SEBAGAI USER."));
+      }
+      if (upperBody === "#TEST KURIR") {
+        await redisClient.set(testModeKey, "COURIER");
+        return res.json(
+          createN8nResponse(rawSenderId, "🛠️ MODE TESTING: ANDA SUDAH DI MODE KURIR.")
         );
       }
+
+      // 2. Login Kurir
+      if (upperBody.startsWith("#LOGIN")) {
+        const inputPhone = upperBody.replace("#LOGIN", "").trim();
+        const cleanPhone = sanitizePhoneNumber(inputPhone);
+        if (!cleanPhone)
+          return res.json(
+            createN8nResponse(rawSenderId, "⚠️ Format salah. Gunakan: #LOGIN <Nomor HP>")
+          );
+        const courierCandidate = await Courier.findOne({ where: { phone: cleanPhone } });
+        if (!courierCandidate)
+          return res.json(
+            createN8nResponse(rawSenderId, `❌ Nomor ${inputPhone} tidak terdaftar.`)
+          );
+
+        await courierCandidate.update({ device_id: rawSenderId, status: "IDLE", is_active: true });
+        await redisClient.sAdd("online_couriers", String(courierCandidate.id));
+        await redisClient.del(testModeKey);
+
+        return res.json(
+          createN8nResponse(
+            rawSenderId,
+            `✅ LOGIN BERHASIL!\nHalo ${courierCandidate.name}, akun aktif.\n\nKetik *#INFO* untuk melihat status kurir anda.`
+          )
+        );
+      }
+
+      // 3. Handle Pesan Kurir
+      // [UPDATE] Kita panggil dengan parameter lengkap agar support gambar & lokasi
+      // mediaData bisa berupa URL (jika highResUrl ada) atau Base64 (jika thumbnail)
+      // Kita kirim ke parameter 'mediaUrl' di handleCourierMessage, karena logic di sana sudah siap handle keduanya.
+
+      const courierReply = await handleCourierMessage(
+        courier,
+        messageBody, // text
+        mediaData, // mediaUrl atau Base64String
+        rawSenderId, // rawSenderId
+        mediaData, // rawBase64 (sebagai backup/redundansi, sama dgn atas)
+        locationData, // locationArg
+        null // io (socket, opsional)
+      );
+
+      // [PENTING] ROUTING RESPONSE BERDASARKAN TIPE/ACTION
+
+      // A. Jika Action = Trigger N8N Image (Kirim Foto Struk ke User)
+      if (courierReply?.action === "trigger_n8n_image") {
+        n8nResponse = createN8nImageResponse(
+          courierReply.data.to,
+          courierReply.data.url,
+          courierReply.data.caption
+        );
+      }
+      // B. Jika Tipe = Location (Kurir Ambil Order)
+      else if (courierReply?.type === "location") {
+        n8nResponse = createN8nLocationResponse(
+          rawSenderId,
+          courierReply.latitude,
+          courierReply.longitude,
+          courierReply.address,
+          courierReply.reply
+        );
+      }
+      // C. Jika Reply Biasa (Text)
+      else if (courierReply?.reply) {
+        n8nResponse = createN8nResponse(rawSenderId, courierReply.reply);
+      }
+    } else {
+      // --- B. FLOW USER ---
+
+      if (upperBody === "#TEST KURIR") {
+        await redisClient.set(testModeKey, "COURIER");
+        return res.json(createN8nResponse(rawSenderId, "🛠️ MODE TESTING: KEMBALI SEBAGAI KURIR."));
+      }
+
+      let existingUser = await User.findOne({
+        where: { [Op.or]: [{ phone: senderIdClean }, { device_id: rawSenderId }] },
+      });
+
+      if (!existingUser && sanitizePhoneNumber(messageBody)) {
+        const phoneInput = sanitizePhoneNumber(messageBody);
+        existingUser = await User.findOne({ where: { phone: phoneInput } });
+        if (!existingUser) {
+          await User.create({ name: senderName, phone: phoneInput, device_id: rawSenderId });
+          n8nResponse = createN8nResponse(
+            rawSenderId,
+            `✅ REGISTRASI BERHASIL!\nSalam kenal Kak ${senderName}.`
+          );
+        } else {
+          await existingUser.update({ device_id: rawSenderId });
+          n8nResponse = createN8nResponse(rawSenderId, `✅ Akun terhubung kembali.`);
+        }
+      } else {
+        if (existingUser) {
+          const userReply = await handleUserMessage(
+            existingUser.phone,
+            existingUser.name,
+            messageBody,
+            rawSenderId,
+            locationData
+          );
+          if (userReply?.reply) n8nResponse = createN8nResponse(rawSenderId, userReply.reply);
+          else if (userReply?.action) n8nResponse = userReply;
+        } else {
+          n8nResponse = createN8nResponse(
+            rawSenderId,
+            `👋 Halo Kak! Mohon verifikasi nomor HP dulu yah (Contoh: 08123456789).`
+          );
+        }
+      }
     }
 
-    return res.status(200).json(responsePayload);
+    if (n8nResponse) return res.json(n8nResponse);
+    return res.status(200).json({ status: "no_response_needed" });
   } catch (error) {
     console.error("❌ Webhook Error:", error);
-    return res.status(200).json({ error: error.message });
+    return res.status(500).json({ error: error.message });
   }
 };

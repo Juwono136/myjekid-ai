@@ -7,7 +7,7 @@ class AIAdapterFactory {
   static createAdapter() {
     const provider = process.env.AI_PROVIDER || "GEMINI";
 
-    switch (provider) {
+    switch (provider.toUpperCase()) {
       case "OPENAI":
         if (!process.env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is missing");
         console.log("🤖 AI Provider: OPENAI (GPT)");

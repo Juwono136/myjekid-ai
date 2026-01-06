@@ -13,7 +13,7 @@ const minioClient = new Client({
   secretKey: process.env.S3_SECRET_KEY,
 });
 
-const BUCKET_NAME = process.env.S3_BUCKET_NAME || "struk-belanja";
+const BUCKET_NAME = process.env.S3_BUCKET_NAME || "myjek-receipts";
 
 // Pastikan Bucket Ada saat startup
 (async () => {
@@ -28,7 +28,8 @@ const BUCKET_NAME = process.env.S3_BUCKET_NAME || "struk-belanja";
 })();
 
 export const storageService = {
-  // DOWNLOAD DARI URL (WAHA) -> UPLOAD KE MINIO
+  // 1. DOWNLOAD DARI URL (WAHA) -> UPLOAD KE MINIO
+  // Digunakan jika gambar dikirim berupa Link (http://...)
   uploadFileFromUrl: async (sourceUrl, targetFilename) => {
     try {
       if (!sourceUrl || !sourceUrl.startsWith("http")) {
@@ -56,18 +57,39 @@ export const storageService = {
       // Upload ke MinIO
       await minioClient.putObject(BUCKET_NAME, targetFilename, response.data);
 
-      console.log(`✅ Sukses upload ke MinIO: ${targetFilename}`);
+      console.log(`✅ Sukses upload URL ke MinIO: ${targetFilename}`);
       return targetFilename;
     } catch (error) {
       // Tampilkan error lebih detail
       const status = error.response ? error.response.status : "Unknown";
       const errMsg = error.message;
-      console.error(`❌ Gagal Upload ke MinIO (Status: ${status}): ${errMsg}`);
+      console.error(`❌ Gagal Upload URL ke MinIO (Status: ${status}): ${errMsg}`);
       return null;
     }
   },
 
-  // AMBIL BUFFER DARI MINIO
+  // 2. [BARU] UPLOAD DARI BASE64
+  // Digunakan jika gambar dikirim berupa kode teks panjang (Raw Image Data)
+  uploadBase64: async (base64String, targetFilename) => {
+    try {
+      // Bersihkan prefix data URI jika ada (cth: data:image/jpeg;base64,...)
+      const cleanString = base64String.replace(/^data:image\/\w+;base64,/, "");
+
+      // Ubah string base64 menjadi Buffer (Binary Data)
+      const buffer = Buffer.from(cleanString, "base64");
+
+      // Upload Buffer ke MinIO
+      await minioClient.putObject(BUCKET_NAME, targetFilename, buffer);
+
+      console.log(`✅ Sukses upload Base64 ke MinIO: ${targetFilename}`);
+      return targetFilename;
+    } catch (error) {
+      console.error(`❌ Gagal Upload Base64 ke MinIO: ${error.message}`);
+      return null;
+    }
+  },
+
+  // 3. AMBIL BUFFER DARI MINIO
   getFileBuffer: async (fileName) => {
     try {
       const dataStream = await minioClient.getObject(BUCKET_NAME, fileName);
@@ -82,7 +104,35 @@ export const storageService = {
     }
   },
 
-  // GENERATE PRESIGNED URL
+  downloadFileAsBase64: async (fileName) => {
+    try {
+      // Pastikan bucket ada
+      const fileStat = await minioClient.statObject(BUCKET_NAME, fileName);
+      if (!fileStat) throw new Error("File tidak ditemukan di MinIO");
+
+      const stream = await minioClient.getObject(BUCKET_NAME, fileName);
+
+      // Baca stream menjadi Buffer
+      const chunks = [];
+      for await (const chunk of stream) {
+        chunks.push(chunk);
+      }
+      const buffer = Buffer.concat(chunks);
+
+      // Validasi buffer tidak kosong
+      if (buffer.length === 0) {
+        throw new Error("Buffer kosong setelah download dari MinIO");
+      }
+
+      // Return raw base64 string (tanpa prefix dulu)
+      return buffer.toString("base64");
+    } catch (error) {
+      console.error(`❌ MinIO Download Error (${fileName}):`, error.message);
+      return null;
+    }
+  },
+
+  // 4. GENERATE PRESIGNED URL (Opsional)
   getPresignedUrl: async (filename) => {
     try {
       return await minioClient.presignedGetObject(BUCKET_NAME, filename, 3600);

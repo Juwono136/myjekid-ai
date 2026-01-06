@@ -35,17 +35,14 @@ class GeminiAdapter {
   }
 
   // Fungsi OCR
-  async extractInvoiceData(imageBuffer) {
+  async processImage(base64Data, mimeType, prompt) {
     try {
-      const prompt =
-        "Analisa gambar struk ini. Cari teks 'Total Tagihan' atau 'Grand Total'. Ambil angkanya saja. Output JSON: { total_amount: number }";
-
       const result = await this.model.generateContent([
         prompt,
         {
           inlineData: {
-            data: imageBuffer.toString("base64"),
-            mimeType: "image/jpeg",
+            data: base64Data,
+            mimeType: mimeType,
           },
         },
       ]);

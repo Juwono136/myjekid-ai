@@ -143,7 +143,7 @@ app.use(globalErrorHandler);
 
 // START SERVER
 server.listen(PORT, () => {
-  logger.info(`🚀 Server running on port ${PORT}`);
+  // logger.info(`🚀 Server running on port ${PORT}`);
   console.log(`\n========================================`);
   console.log(`🚀 SERVER RUNNING ON PORT ${PORT}`);
   console.log(`🤖 AI PROVIDER: ${process.env.AI_PROVIDER}`);

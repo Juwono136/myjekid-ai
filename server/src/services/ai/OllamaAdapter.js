@@ -2,46 +2,39 @@ import axios from "axios";
 
 class OllamaAdapter {
   constructor(baseUrl, model) {
-    this.baseUrl = baseUrl || "http://localhost:11434";
-    this.model = model || "llama3";
+    this.baseUrl = baseUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434/api";
+    this.model = model || process.env.OLLAMA_MODEL || "llama3";
   }
 
-  async generateResponse(systemPrompt, userMessage, context = {}) {
+  async generateResponse(systemPrompt, userText, context = {}) {
     try {
-      const prompt = `${systemPrompt}\nCONTEXT: ${JSON.stringify(
-        context
-      )}\nUSER: ${userMessage}\nOutput JSON only.`;
+      const contextString = JSON.stringify(context, null, 2);
 
-      const response = await axios.post(`${this.baseUrl}/api/generate`, {
+      const payload = {
         model: this.model,
-        prompt: prompt,
-        format: "json", // Ollama support JSON mode
-        stream: false,
-      });
-
-      return JSON.parse(response.data.response);
-    } catch (error) {
-      console.error("[Ollama] Error:", error);
-      throw error;
-    }
-  }
-
-  // Ollama Vision
-  async extractInvoiceData(imageBuffer) {
-    try {
-      const response = await axios.post(`${this.baseUrl}/api/generate`, {
-        model: "llava", // Wajib install model llava di ollama
-        prompt: "Find 'Total Tagihan' amount. Output JSON format: { \"total_amount\": 12345 }",
-        images: [imageBuffer.toString("base64")],
+        messages: [
+          { role: "system", content: systemPrompt },
+          {
+            role: "user",
+            content: `CONTEXT:\n${contextString}\n\nUSER:\n${userText}\n\n(Format: JSON)`,
+          },
+        ],
         stream: false,
         format: "json",
-      });
+        options: { temperature: 0.1 },
+      };
 
-      return JSON.parse(response.data.response);
+      const response = await axios.post(`${this.baseUrl}/chat`, payload);
+      const rawContent = response.data.message.content;
+      return JSON.parse(rawContent);
     } catch (error) {
-      console.error("[Ollama Vision] Error (Pastikan model 'llava' terinstall):", error);
-      return { total_amount: 0 };
+      console.error("❌ Ollama Error:", error.message);
+      return { intent: "CHITCHAT", reply: "Maaf, AI Lokal timeout.", data: {} };
     }
+  }
+
+  async processImage() {
+    return "0";
   }
 }
 

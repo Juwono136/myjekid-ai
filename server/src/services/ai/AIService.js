@@ -71,44 +71,81 @@ class AIService {
       - Jika ORDER_COMPLETE: Cukup bilang "Baik kak, mohon dicek ringkasannya di bawah ini 👇" (JANGAN TULIS ULANG STRUK DI SINI, Sistem yang akan buat).
     `;
 
-    return await this.adapter.generateResponse(SYSTEM_PROMPT, text, context);
+    const result = await this.adapter.generateResponse(SYSTEM_PROMPT, text, context);
+
+    return result;
   }
 
   // Fungsi untuk Membaca Struk/Invoice
-  async readInvoice(mediaUrl, itemsSummary = []) {
+  async readInvoice(imageInput, itemsSummary = []) {
     try {
-      console.log(`🤖 AI Processing: Downloading image from ${mediaUrl}...`);
+      console.log("🤖 AI Processing: Start reading invoice...");
 
-      // Download Gambar dari WAHA (Wajib pakai Header Auth)
-      const imageBase64 = await this.downloadImageAsBase64(mediaUrl);
+      let imageBase64 = "";
 
-      if (!imageBase64) {
-        throw new Error("Gagal mendownload gambar (Base64 is null)");
+      // --- LOGIC 1: Jika Input adalah URL (Http/Https) ---
+      if (imageInput.startsWith("http://") || imageInput.startsWith("https://")) {
+        console.log(`🤖 AI: Downloading image from URL...`);
+        // Download via Axios helper di bawah
+        imageBase64 = await this.downloadImageAsBase64(imageInput);
+      }
+      // --- LOGIC 2: Jika Input sudah berupa String Base64 (Raw Data) ---
+      else if (imageInput.length > 100) {
+        console.log("🤖 AI: Receiving direct Base64 input...");
+        // Bersihkan prefix 'data:image/jpeg;base64,' jika terbawa, agar murni raw base64
+        imageBase64 = imageInput.replace(/^data:image\/\w+;base64,/, "");
       }
 
-      console.log("✅ Image downloaded. Asking Adapter to process...");
+      // Validasi Akhir sebelum dikirim ke Adapter
+      if (!imageBase64) {
+        throw new Error(
+          "Gagal mendapatkan data gambar (Input bukan URL valid & bukan Base64 valid)"
+        );
+      }
+
+      console.log("✅ Image ready. Asking Adapter to process...");
 
       const prompt = `
-        Kamu adalah asisten kasir yang cerdas.
-        Tugasmu: Analisa gambar struk/nota belanja ini.
+        Peran: Kamu adalah mesin OCR (Optical Character Recognition) khusus struk belanja.
+        Tugas: Ekstrak "TOTAL PEMBAYARAN" atau "GRAND TOTAL" dari gambar ini.
+
+        Konteks Barang: ${JSON.stringify(itemsSummary)}
+
+        INSTRUKSI PENTING:
+        1. Cari angka nominal uang terbesar yang merepresentasikan total akhir transaksi.
+        2. HANYA tuliskan angkanya saja. JANGAN pakai teks 'Rp', titik, koma, atau spasi.
+        3. Contoh Output Benar: 50000
+        4. Contoh Output Salah: "Totalnya 50.000", "Rp 50.000", "50,000"
         
-        Konteks Barang yang harusnya dibeli: ${JSON.stringify(itemsSummary)}
-        
-        Instruksi Output:
-        Hanya kembalikan SATU ANGKA (Integer) yaitu TOTAL HARGA AKHIR yang harus dibayar.
-        Jangan ada teks lain, jangan ada 'Rp', titik, atau koma. Hanya angka murni.
-        Jika gambar buram atau bukan struk, kembalikan angka 0.
+        Jika tidak yakin atau gambar buram, jawab: 0
       `;
 
-      const aiResponseText = await this.adapter.processImage(imageBase64, "image/jpeg", prompt);
+      const rawResponse = await this.adapter.processImage(imageBase64, "image/jpeg", prompt);
 
-      // Proses Hasil (Cleaning)
-      const cleanTotal = parseInt(aiResponseText.replace(/[^0-9]/g, "")) || 0;
+      // --- [STEP PERBAIKAN UTAMA: SAFETY CONVERSION] ---
+      let textString = "";
 
-      console.log(`💰 AI Result: Rp ${cleanTotal}`);
+      if (typeof rawResponse === "string") {
+        textString = rawResponse;
+      } else if (typeof rawResponse === "object") {
+        // Jika Adapter mengembalikan Object/JSON, kita stringify dulu
+        textString = JSON.stringify(rawResponse);
+      } else {
+        // Jika number atau tipe lain
+        textString = String(rawResponse);
+      }
+
+      console.log(`🔍 DEBUG RAW AI RESPONSE (Type: ${typeof rawResponse}): "${textString}"`);
+
+      // 3. Clean Result (Sekarang aman karena textString PASTI string)
+      const cleanText = textString.replace(/[^0-9]/g, "");
+      const cleanTotal = parseInt(cleanText) || 0;
+
+      console.log(`💰 AI Parsed Result: Rp ${cleanTotal}`);
       return { total: cleanTotal };
     } catch (error) {
       console.error("❌ AI Service Error:", error.message);
+      // Return 0 agar tidak crash, flow bisa lanjut ke input manual
       return { total: 0 };
     }
   }
