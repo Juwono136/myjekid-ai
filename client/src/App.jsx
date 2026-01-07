@@ -12,6 +12,7 @@ import Settings from "./pages/Settings";
 import CourierManagement from "./pages/CourierManagement";
 import LiveMap from "./pages/LiveMap";
 import ProtectedRoute from "./components/ProtectedRoute";
+import OrderMonitor from "./pages/OrderMonitor";
 
 // Placeholder Pages (Untuk Menu Lain yang belum dibuat)
 const PlaceholderPage = ({ title }) => (
@@ -42,7 +43,7 @@ function App() {
             <Route index element={<DashboardHome />} />
 
             <Route path="map" element={<LiveMap />} />
-            <Route path="orders" element={<PlaceholderPage title="Order Monitor" />} />
+            <Route path="orders" element={<OrderMonitor />} />
             <Route path="chat" element={<PlaceholderPage title="Intervention Chat" />} />
             <Route path="reports" element={<PlaceholderPage title="Laporan Transaksi" />} />
             <Route path="couriers" element={<CourierManagement />} />

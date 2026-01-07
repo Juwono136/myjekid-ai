@@ -32,7 +32,7 @@ api.interceptors.response.use(
 
       // 2. Cek Status 401 (Unauthorized) atau 403 (Forbidden)
       // Pastikan error bukan berasal dari halaman login (salah password)
-      if ((status === 401 || status === 403) && !error.config.url.includes("/login")) {
+      if ((status === 401 || status === 403) && !error.config.url.includes("/auth/login")) {
         console.warn("[Auth] Sesi habis atau tidak valid. Melakukan logout...");
 
         // A. Hapus data sesi
