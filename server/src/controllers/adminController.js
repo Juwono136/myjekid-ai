@@ -1,10 +1,9 @@
-import { Admin } from "../models/index.js";
-import { Op } from "sequelize";
+import { Admin, Order, Courier, User, ChatSession, sequelize } from "../models/index.js";
+import { Op, QueryTypes } from "sequelize";
 import bcrypt from "bcryptjs";
 import AppError from "../utils/AppError.js";
 import logger from "../utils/logger.js";
 import { validateEmail, validatePassword } from "../utils/validators.js";
-import { ChatSession } from "../models/index.js";
 
 // API untuk Admin mematikan/menyalakan Bot user tertentu (Switch mode)
 export const setSessionMode = async (req, res) => {
@@ -213,6 +212,132 @@ export const deleteAdmin = async (req, res, next) => {
       status: "success",
       message: "User berhasil dihapus",
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getDashboardStats = async (req, res, next) => {
+  try {
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+
+    // --- Metrics ---
+    const revRaw = await Order.sum("total_amount", {
+      where: { status: "COMPLETED", created_at: { [Op.gte]: startOfMonth } },
+    });
+    const revenueMonth = parseFloat(revRaw) || 0;
+    const ordersMonth = await Order.count({ where: { created_at: { [Op.gte]: startOfMonth } } });
+    const ordersToday = await Order.count({ where: { created_at: { [Op.gte]: startOfToday } } });
+    const activeCouriers = await Courier.count({
+      where: { status: { [Op.or]: ["IDLE", "BUSY"] }, is_active: true },
+    });
+    const pendingOrders = await Order.count({
+      where: { status: { [Op.notIn]: ["COMPLETED", "CANCELLED"] } },
+    });
+
+    // --- Recent Orders ---
+    const recentOrders = await Order.findAll({
+      limit: 5,
+      order: [["created_at", "DESC"]],
+      attributes: [
+        "order_id",
+        "total_amount",
+        "status",
+        "created_at",
+        "items_summary",
+        "user_phone",
+      ],
+    });
+
+    res.status(200).json({
+      status: "success",
+      data: {
+        stats: { revenueMonth, ordersMonth, ordersToday, activeCouriers, pendingOrders },
+        recentOrders,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// 2. FUNGSI BARU: KHUSUS UNTUK CHART (INDEPENDEN)
+export const getChartData = async (req, res, next) => {
+  try {
+    const { type, range } = req.query; // type: 'revenue' | 'distribution'
+
+    // Tentukan Anchor Date (Logic Future Data / Current Date)
+    let anchorDate = new Date();
+    const lastOrder = await Order.findOne({
+      where: { status: "COMPLETED" },
+      order: [["created_at", "DESC"]],
+      attributes: ["created_at"],
+    });
+    if (lastOrder) anchorDate = new Date(lastOrder.created_at);
+
+    let startDate = new Date(anchorDate);
+
+    // Logic Range
+    if (range === "30days") startDate.setDate(anchorDate.getDate() - 29);
+    else if (range === "1year") startDate.setFullYear(anchorDate.getFullYear() - 1);
+    else startDate.setDate(anchorDate.getDate() - 6); // Default 7 days
+
+    startDate.setHours(0, 0, 0, 0);
+
+    let resultData = [];
+
+    if (type === "revenue") {
+      // --- LOGIC REVENUE CHART ---
+      const rawData = await sequelize.query(
+        `SELECT DATE(created_at) as date, SUM(total_amount) as income 
+           FROM orders 
+           WHERE status = 'COMPLETED' AND created_at >= :startDate AND created_at <= :endDate
+           GROUP BY DATE(created_at) ORDER BY DATE(created_at) ASC`,
+        { replacements: { startDate, endDate: anchorDate }, type: QueryTypes.SELECT }
+      );
+
+      // Zero Filling
+      const diffTime = Math.abs(anchorDate - startDate);
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      const loopDays = diffDays > 366 ? 366 : diffDays + 1;
+
+      for (let i = 0; i < loopDays; i++) {
+        const d = new Date(startDate);
+        d.setDate(d.getDate() + i);
+        const dateString = d.toLocaleDateString("en-CA");
+        const match = rawData.find((r) => {
+          const rd =
+            typeof r.date === "string"
+              ? r.date.substring(0, 10)
+              : new Date(r.date).toLocaleDateString("en-CA");
+          return rd === dateString;
+        });
+
+        resultData.push({
+          date: dateString,
+          displayDate: d.toISOString(), // Kirim ISO string agar frontend bisa format sendiri
+          income: match ? parseFloat(match.income) : 0,
+        });
+      }
+    } else if (type === "distribution") {
+      // --- LOGIC DONUT CHART ---
+      const rawStatus = await sequelize.query(
+        `SELECT status, COUNT(*) as count FROM orders 
+           WHERE created_at >= :startDate AND created_at <= :endDate
+           GROUP BY status`,
+        { replacements: { startDate, endDate: anchorDate }, type: QueryTypes.SELECT }
+      );
+
+      resultData = rawStatus.map((r) => ({
+        name: r.status,
+        value: parseInt(r.count, 10),
+      }));
+    }
+
+    res.status(200).json({ status: "success", data: resultData });
   } catch (error) {
     next(error);
   }

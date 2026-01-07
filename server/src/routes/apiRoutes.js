@@ -6,6 +6,8 @@ import {
   createAdmin,
   updateAdmin,
   deleteAdmin,
+  getDashboardStats,
+  getChartData,
 } from "../controllers/adminController.js";
 import {
   getAllCouriers,
@@ -24,6 +26,10 @@ router.post("/auth/login", loginAdmin);
 // --- PROTECTED ROUTES (Harus Login) ---
 // PENTING: Semua route di bawah baris ini akan dicek tokennya
 router.use(verifyToken);
+
+// Dashboard Overview
+router.get("/dashboard/stats", getDashboardStats);
+router.get("/dashboard/chart", getChartData);
 
 // 1. Cek Session User
 router.get("/auth/me", getMe);

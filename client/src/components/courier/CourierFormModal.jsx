@@ -65,9 +65,15 @@ const CourierFormModal = ({ isOpen, onClose, onSubmit, initialData, isLoading, i
             <label className="label text-xs font-bold text-gray-500 uppercase">No. WhatsApp</label>
             <input
               type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={15}
               required
               value={formData.phone}
-              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+              onChange={(e) => {
+                const onlyNumbers = e.target.value.replace(/\D/g, "");
+                setFormData({ ...formData, phone: onlyNumbers });
+              }}
               className="input input-bordered w-full rounded-xl focus:border-orange-500 focus:outline-none font-mono"
               placeholder="62812xxxx"
             />

@@ -53,14 +53,14 @@ const Navbar = () => {
         ======================== */}
         <div className="flex-none flex items-center gap-2 md:gap-4">
           {/* Search Bar (Hidden di Mobile Kecil) */}
-          <div className="hidden md:flex items-center bg-gray-50 hover:bg-gray-100 transition-colors rounded-full px-4 py-2 w-64 border border-transparent focus-within:border-[#f14c06]/30 focus-within:bg-white focus-within:shadow-sm">
+          {/* <div className="hidden md:flex items-center bg-gray-50 hover:bg-gray-100 transition-colors rounded-full px-4 py-2 w-64 border border-transparent focus-within:border-[#f14c06]/30 focus-within:bg-white focus-within:shadow-sm">
             <FiSearch className="text-gray-400" />
             <input
               type="text"
               placeholder="Cari Order / Kurir..."
               className="bg-transparent border-none focus:ring-0 text-sm ml-2 w-full text-gray-700 placeholder-gray-400 outline-none"
             />
-          </div>
+          </div> */}
 
           {/* Tombol Notifikasi */}
           <button className="btn btn-ghost btn-circle btn-sm text-gray-500 hover:text-[#f14c06] hover:bg-orange-50 relative">

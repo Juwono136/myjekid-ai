@@ -11,6 +11,7 @@ import RoleBasedRoute from "./components/RoleBasedRoute";
 import Settings from "./pages/Settings";
 import CourierManagement from "./pages/CourierManagement";
 import LiveMap from "./pages/LiveMap";
+import ProtectedRoute from "./components/ProtectedRoute";
 
 // Placeholder Pages (Untuk Menu Lain yang belum dibuat)
 const PlaceholderPage = ({ title }) => (
@@ -36,29 +37,36 @@ function App() {
         <Route path="/login" element={<Login />} />
 
         {/* PROTECTED ROUTES (DASHBOARD) */}
-        <Route path="/dashboard" element={<MainLayout />}>
-          {/* Index route: /dashboard */}
-          <Route index element={<DashboardHome />} />
+        <Route element={<ProtectedRoute />}>
+          <Route path="/dashboard" element={<MainLayout />}>
+            <Route index element={<DashboardHome />} />
 
-          {/* Child routes: /dashboard/map, dll */}
-          <Route path="map" element={<LiveMap />} />
-          <Route path="orders" element={<PlaceholderPage title="Order Monitor" />} />
-          <Route path="chat" element={<PlaceholderPage title="Intervention Chat" />} />
-          <Route path="reports" element={<PlaceholderPage title="Laporan Transaksi" />} />
-          <Route path="couriers" element={<CourierManagement />} />
-          <Route
-            path="users"
-            element={
-              <RoleBasedRoute allowedRoles={["SUPER_ADMIN"]}>
-                <UserManagement />
-              </RoleBasedRoute>
-            }
-          />
-          <Route path="settings" element={<Settings />} />
+            <Route path="map" element={<LiveMap />} />
+            <Route path="orders" element={<PlaceholderPage title="Order Monitor" />} />
+            <Route path="chat" element={<PlaceholderPage title="Intervention Chat" />} />
+            <Route path="reports" element={<PlaceholderPage title="Laporan Transaksi" />} />
+            <Route path="couriers" element={<CourierManagement />} />
+
+            {/* Role Based Route tetap digunakan di dalam sini untuk proteksi spesifik */}
+            <Route
+              path="users"
+              element={
+                <RoleBasedRoute allowedRoles={["SUPER_ADMIN"]}>
+                  <UserManagement />
+                </RoleBasedRoute>
+              }
+            />
+            <Route path="settings" element={<Settings />} />
+          </Route>
         </Route>
 
         {/* DEFAULT REDIRECT */}
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route
+          path="*"
+          element={
+            <Navigate to={localStorage.getItem("token") ? "/dashboard" : "/login"} replace />
+          }
+        />
       </Routes>
     </BrowserRouter>
   );

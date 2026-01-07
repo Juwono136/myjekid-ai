@@ -14,7 +14,7 @@ const MapUpdater = ({ center, zoom }) => {
         duration: 1.5, // Efek terbang yang halus
       });
     } else {
-      toast.error("Maaf, koordinat tidak valid.");
+      toast.error("Koordinat tidak valid atau kurir baru pertama kali ditambahkan.");
     }
   }, [center, zoom, map, toast]);
   return null;

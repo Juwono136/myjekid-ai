@@ -5,6 +5,7 @@ import {
   createCourier,
   updateCourier,
   deleteCourier,
+  resetState,
 } from "../features/courierSlice";
 
 // --- LIBRARY ---
@@ -56,11 +57,14 @@ const CourierManagement = () => {
     };
 
     dispatch(fetchCouriers(params));
+  }, [dispatch, currentPage, debouncedSearch, statusFilter, sort]);
 
+  useEffect(() => {
     if (isError && message) {
       toast.error(message);
+      dispatch(resetState());
     }
-  }, [dispatch, currentPage, debouncedSearch, statusFilter, sort, isError, message]);
+  }, [isError, message, dispatch]);
 
   // --- HANDLERS ---
   const handleSearchChange = (val) => {
@@ -152,7 +156,7 @@ const CourierManagement = () => {
   return (
     <div className="space-y-6 pb-10">
       <PageHeader
-        title="Manajemen Mitra Kurir"
+        title="Manajemen Data Kurir"
         description="Monitor lokasi, status operasional, dan data kurir."
         btnLabel="Tambah Kurir"
         onBtnClick={handleOpenAdd}

@@ -109,6 +109,13 @@ const Sidebar = ({ closeDrawer }) => {
             <FiLogOut size={20} className="group-hover:-translate-x-1 transition-transform" />
             Keluar Aplikasi
           </button>
+
+          {/* FOOTER BARU */}
+          <div className="px-4 py-2 text-center">
+            <p className="text-[10px] text-gray-400">
+              &copy; {new Date().getFullYear()} MyJek Indonesia
+            </p>
+          </div>
         </div>
       </div>
 

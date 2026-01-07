@@ -148,6 +148,8 @@ const UserManagement = () => {
       day: "numeric",
       month: "short",
       year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     });
   };
 
@@ -232,7 +234,7 @@ const UserManagement = () => {
                       {/* KOLOM ROLE (Perbaikan Safety Check) */}
                       <td>
                         <div
-                          className={`badge ${getRoleBadge(
+                          className={`badge w-max ${getRoleBadge(
                             u.role
                           )} border px-3 py-3 rounded-lg font-bold text-[10px] tracking-wide`}
                         >
@@ -260,7 +262,7 @@ const UserManagement = () => {
                       </td>
 
                       <td>
-                        <div className="flex items-center gap-2 text-gray-600">
+                        <div className="flex items-center gap-2 w-max text-gray-600">
                           <FiCalendar className="text-gray-400" />
                           {formatDate(u.created_at)}
                         </div>

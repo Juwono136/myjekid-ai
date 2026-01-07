@@ -64,7 +64,7 @@ const CourierTable = ({ couriers, isLoading, onEdit, onDelete }) => {
                   </td>
                   <td>
                     <span
-                      className={`badge badge-sm badge-outline font-medium ${
+                      className={`badge badge-sm badge-outline font-medium w-max ${
                         item.shift_code === 1
                           ? "badge-info text-blue-600 border-blue-200 bg-blue-50"
                           : "badge-secondary text-pink-600 border-pink-200 bg-pink-50"
@@ -79,6 +79,7 @@ const CourierTable = ({ couriers, isLoading, onEdit, onDelete }) => {
                       new Date(item.last_active_at).toLocaleString("id-ID", {
                         day: "numeric",
                         month: "short",
+                        year: "numeric",
                         hour: "2-digit",
                         minute: "2-digit",
                       })
