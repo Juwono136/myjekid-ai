@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useSelector, useDispatch } from "react-redux";
 import { Link } from "react-router-dom";
-import { FiMenu, FiBell, FiSearch, FiSettings, FiLogOut, FiChevronDown } from "react-icons/fi";
+import { FiMenu, FiBell, FiSettings, FiLogOut } from "react-icons/fi";
 import { logout } from "../features/authSlice";
 import Breadcrumbs from "./Breadcrumbs";
 import ConfirmationModal from "./ConfirmationModal";

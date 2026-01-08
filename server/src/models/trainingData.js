@@ -3,9 +3,9 @@ import { sequelize } from "../config/database.js";
 
 const TrainingData = sequelize.define("training_data", {
   id: {
-    type: DataTypes.INTEGER,
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
     primaryKey: true,
-    autoIncrement: true,
   },
   user_question: {
     type: DataTypes.TEXT,
@@ -14,11 +14,11 @@ const TrainingData = sequelize.define("training_data", {
   },
   admin_answer: {
     type: DataTypes.TEXT,
-    allowNull: false,
+    allowNull: true, // Allow null karena mungkin admin belum jawab
     comment: "Jawaban ideal yang diketik manual oleh Admin",
   },
   category: {
-    type: DataTypes.STRING, // Contoh: "ORDER", "COMPLAINT", "UNKNOWN"
+    type: DataTypes.STRING,
     allowNull: true,
   },
   source: {

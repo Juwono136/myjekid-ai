@@ -1,5 +1,5 @@
 import { Op } from "sequelize";
-import { User, Courier } from "../models/index.js";
+import { User, Courier, ChatSession, TrainingData } from "../models/index.js";
 import { handleUserMessage } from "../services/flows/userFlow.js";
 import { handleCourierMessage } from "../services/flows/courierFlow.js";
 import { redisClient } from "../config/redisClient.js";
@@ -19,23 +19,22 @@ const createN8nResponse = (to, body) => {
 // --- N8N RESPONSE (LOCATION) ---
 const createN8nLocationResponse = (to, lat, long, address, reply) => {
   return {
-    action: "reply_location", // Kunci untuk Switch Node di n8n
+    action: "reply_location",
     data: {
       to: to,
       latitude: lat,
       longitude: long,
       address: address,
-      title: "Lokasi", // Default title
-      reply: reply || "", // Pesan teks pendamping (jika n8n support)
+      title: "Lokasi",
+      reply: reply || "",
     },
   };
 };
 
-// --- [BARU] N8N RESPONSE (IMAGE) ---
-// Digunakan saat bot ingin mengirim foto struk ke User
+// --- N8N RESPONSE (IMAGE) ---
 const createN8nImageResponse = (to, url, caption) => {
   return {
-    action: "reply_image", // Pastikan di N8N Action Router diarahkan ke Node Image
+    action: "reply_image",
     data: {
       to: to,
       url: url,
@@ -77,7 +76,7 @@ export const handleIncomingMessage = async (req, res) => {
     // Deteksi Isi Pesan
     let messageBody = "";
     let locationData = null;
-    let mediaData = null; // Untuk menyimpan URL/Base64 Gambar
+    let mediaData = null;
 
     if (messageType === "chat") {
       messageBody = payload.body || "";
@@ -90,21 +89,13 @@ export const handleIncomingMessage = async (req, res) => {
       messageBody = "SHARE_LOCATION_EVENT";
     } else if (messageType === "image") {
       messageBody = payload.caption || "";
-
-      // --- PERBAIKAN LOGIKA PENGAMBILAN GAMBAR ---
-      // Prioritas 1: Ambil URL High-Res (biasanya ada di payload.media.url, payload.mediaUrl, atau _data.mediaUrl)
-      // Prioritas 2: Ambil body (Hati-hati, ini seringkali cuma thumbnail)
-
-      // Cek variasi struktur payload WAHA/n8n untuk URL
       const highResUrl =
         payload.media?.url || payload.mediaUrl || payload._data?.mediaUrl || payload.url;
       const thumbnailBase64 = payload.body || payload._data?.body;
 
       if (highResUrl) {
-        console.log("📸 Webhook: Mendeteksi Image URL (High Res).");
         mediaData = highResUrl;
       } else {
-        console.log("📸 Webhook: Mendeteksi Base64 Body (Mungkin Low Res/Thumbnail).");
         mediaData = thumbnailBase64;
       }
     }
@@ -175,38 +166,30 @@ export const handleIncomingMessage = async (req, res) => {
         return res.json(
           createN8nResponse(
             rawSenderId,
-            `✅ LOGIN BERHASIL!\nHalo ${courierCandidate.name}, akun aktif.\n\nKetik *#INFO* untuk melihat status kurir anda.`
+            `✅ LOGIN BERHASIL!\nHalo ${courierCandidate.name}, akun aktif.`
           )
         );
       }
 
       // 3. Handle Pesan Kurir
-      // [UPDATE] Kita panggil dengan parameter lengkap agar support gambar & lokasi
-      // mediaData bisa berupa URL (jika highResUrl ada) atau Base64 (jika thumbnail)
-      // Kita kirim ke parameter 'mediaUrl' di handleCourierMessage, karena logic di sana sudah siap handle keduanya.
-
       const courierReply = await handleCourierMessage(
         courier,
-        messageBody, // text
-        mediaData, // mediaUrl atau Base64String
-        rawSenderId, // rawSenderId
-        mediaData, // rawBase64 (sebagai backup/redundansi, sama dgn atas)
-        locationData, // locationArg
-        null // io (socket, opsional)
+        messageBody,
+        mediaData,
+        rawSenderId,
+        mediaData,
+        locationData,
+        req.io
       );
 
-      // [PENTING] ROUTING RESPONSE BERDASARKAN TIPE/ACTION
-
-      // A. Jika Action = Trigger N8N Image (Kirim Foto Struk ke User)
+      // Routing Response Kurir
       if (courierReply?.action === "trigger_n8n_image") {
         n8nResponse = createN8nImageResponse(
           courierReply.data.to,
           courierReply.data.url,
           courierReply.data.caption
         );
-      }
-      // B. Jika Tipe = Location (Kurir Ambil Order)
-      else if (courierReply?.type === "location") {
+      } else if (courierReply?.type === "location") {
         n8nResponse = createN8nLocationResponse(
           rawSenderId,
           courierReply.latitude,
@@ -214,19 +197,18 @@ export const handleIncomingMessage = async (req, res) => {
           courierReply.address,
           courierReply.reply
         );
-      }
-      // C. Jika Reply Biasa (Text)
-      else if (courierReply?.reply) {
+      } else if (courierReply?.reply) {
         n8nResponse = createN8nResponse(rawSenderId, courierReply.reply);
       }
     } else {
-      // --- B. FLOW USER ---
+      // --- B. FLOW USER (DENGAN LOGIC SAFETY NET) ---
 
       if (upperBody === "#TEST KURIR") {
         await redisClient.set(testModeKey, "COURIER");
         return res.json(createN8nResponse(rawSenderId, "🛠️ MODE TESTING: KEMBALI SEBAGAI KURIR."));
       }
 
+      // 1. Identifikasi User & Registrasi
       let existingUser = await User.findOne({
         where: { [Op.or]: [{ phone: senderIdClean }, { device_id: rawSenderId }] },
       });
@@ -246,16 +228,103 @@ export const handleIncomingMessage = async (req, res) => {
         }
       } else {
         if (existingUser) {
+          // --- LOGIC INTERVENTION & HANDOFF ---
+
+          // 1. Ambil / Buat Sesi Chat
+          let session = await ChatSession.findOne({ where: { phone: existingUser.phone } });
+          if (!session) {
+            session = await ChatSession.create({
+              phone: existingUser.phone,
+              user_name: existingUser.name,
+              mode: "BOT",
+              last_interaction: new Date(),
+            });
+          }
+
+          // 2. Cek Kondisi "DIAM" (Human Mode atau Paused)
+          const isHumanMode = session.mode === "HUMAN";
+          const currentTime = new Date();
+          const isPaused =
+            session.is_paused_until && new Date(session.is_paused_until) > currentTime;
+
+          if (isHumanMode || isPaused) {
+            // ============================================================
+            // KONDISI A: MODE HUMAN / PAUSED -> BOT DIAM & FORWARD KE ADMIN
+            // ============================================================
+
+            // Simpan Log ke TrainingData
+            await TrainingData.create({
+              user_question: messageBody,
+              admin_answer: null, // Belum dijawab
+              category: "HUMAN_INTERVENTION",
+              source: "WHATSAPP_USER",
+            });
+
+            // Emit Socket (Pesan User)
+            if (req.io) {
+              req.io.emit("intervention-message", {
+                phone: existingUser.phone,
+                user_name: existingUser.name,
+                text: messageBody,
+                sender: "USER",
+                timestamp: new Date(),
+                mode: "HUMAN", // Kirim status HUMAN
+              });
+            }
+
+            // Stop Bot (Return response kosong agar Bot tidak membalas)
+            return res.status(200).json({ status: "forwarded_to_admin" });
+          }
+
+          // ============================================================
+          // KONDISI B: MODE BOT (AI BEKERJA)
+          // ============================================================
+
+          // Cek apakah waktu pause sudah habis? Jika ya, bersihkan status di DB
+          if (session.is_paused_until && new Date(session.is_paused_until) <= currentTime) {
+            await session.update({ is_paused_until: null, mode: "BOT" });
+          }
+
+          // Jalankan AI Service
           const userReply = await handleUserMessage(
             existingUser.phone,
             existingUser.name,
             messageBody,
             rawSenderId,
-            locationData
+            locationData,
+            req.io
           );
+
+          // Emit Socket (Monitoring Dashboard)
+          if (req.io) {
+            // Pesan User
+            req.io.emit("intervention-message", {
+              phone: existingUser.phone,
+              user_name: existingUser.name,
+              text: messageBody,
+              sender: "USER",
+              timestamp: new Date(),
+              mode: "BOT",
+            });
+
+            // Balasan Bot
+            if (userReply?.reply) {
+              req.io.emit("intervention-message", {
+                phone: existingUser.phone,
+                user_name: existingUser.name,
+                text: userReply.reply,
+                sender: "BOT",
+                timestamp: new Date(),
+                mode: "BOT",
+              });
+            }
+          }
+
+          // Format Response ke N8N
           if (userReply?.reply) n8nResponse = createN8nResponse(rawSenderId, userReply.reply);
           else if (userReply?.action) n8nResponse = userReply;
         } else {
+          // User Belum Terdaftar
           n8nResponse = createN8nResponse(
             rawSenderId,
             `👋 Halo Kak! Mohon verifikasi nomor HP dulu yah (Contoh: 08123456789).`

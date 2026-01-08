@@ -12,7 +12,7 @@ const Breadcrumbs = () => {
     dashboard: "Overview",
     map: "Live Map",
     orders: "Order Monitor",
-    chat: "Intervention",
+    chat: "Chat",
     reports: "Laporan",
     settings: "Pengaturan",
     couriers: "Kurir",

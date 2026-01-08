@@ -1,4 +1,4 @@
-import { Order, User } from "../models/index.js";
+import { Courier, Order, User } from "../models/index.js";
 import { Op } from "sequelize";
 import AppError from "../utils/AppError.js";
 import logger from "../utils/logger.js";
@@ -83,9 +83,14 @@ export const getOrderById = async (req, res, next) => {
         {
           model: User,
           as: "user",
-          attributes: ["name", "phone"], // Ambil info user
+          attributes: ["name", "phone"],
         },
-        // HAPUS include OrderItem karena tabelnya tidak ada
+        // TAMBAHAN BARU: Include Courier
+        {
+          model: Courier,
+          as: "courier", // Pastikan sesuai dengan alias di model/index.js (default biasanya lowercase nama model)
+          attributes: ["name", "phone", "status"],
+        },
       ],
     });
 

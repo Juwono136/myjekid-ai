@@ -5,6 +5,7 @@ import Order from "./order.js";
 import ChatSession from "./chatSession.js";
 import Admin from "./admin.js";
 import TrainingData from "./trainingData.js";
+import Notification from "./notification.js";
 
 // User <-> Order
 User.hasMany(Order, { foreignKey: "user_phone", sourceKey: "phone" });
@@ -18,4 +19,4 @@ Order.belongsTo(Courier, { foreignKey: "courier_id", targetKey: "id" });
 User.hasOne(ChatSession, { foreignKey: "phone", sourceKey: "phone" });
 ChatSession.belongsTo(User, { foreignKey: "phone", targetKey: "phone" });
 
-export { sequelize, User, Courier, Order, ChatSession, Admin, TrainingData };
+export { sequelize, User, Courier, Order, ChatSession, Admin, TrainingData, Notification };

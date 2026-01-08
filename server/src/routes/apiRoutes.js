@@ -18,6 +18,13 @@ import {
 import { verifyToken } from "../middleware/authMiddleware.js";
 import { restrictTo } from "../middleware/roleMiddleware.js";
 import { getAllOrders, getOrderById } from "../controllers/orderController.js";
+import { getNotifications, markAsRead } from "../controllers/notificationController.js";
+import {
+  getActiveSessions,
+  getChatHistory,
+  sendMessageToUser,
+  toggleSessionMode,
+} from "../controllers/interventionController.js";
 
 const router = express.Router();
 
@@ -35,6 +42,16 @@ router.get("/dashboard/chart", getChartData);
 // Orders Monitor
 router.get("/orders", getAllOrders);
 router.get("/orders/:id", getOrderById);
+
+// NOTIFICATION ROUTES
+router.get("/notifications", getNotifications);
+router.put("/notifications/:id/read", markAsRead);
+
+// --- INTERVENTION ROUTES ---
+router.get("/intervention/sessions", getActiveSessions);
+router.get("/intervention/history/:phone", getChatHistory);
+router.post("/intervention/send", sendMessageToUser);
+router.post("/intervention/toggle-mode", toggleSessionMode);
 
 // 1. Cek Session User
 router.get("/auth/me", getMe);

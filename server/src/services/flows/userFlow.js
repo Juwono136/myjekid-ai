@@ -8,11 +8,20 @@ import {
 import { orderService } from "../orderService.js";
 import { redisClient } from "../../config/redisClient.js";
 import { dispatchService } from "../dispatchService.js";
+import { createSystemNotification } from "../../controllers/notificationController.js";
 
 // Helper sapaan
 const sapa = (name) => (name === "Customer" || !name ? "Kak" : `Kak ${name}`);
 
-export const handleUserMessage = async (phone, name, text, rawSenderId, locationData = null) => {
+// Tambahkan parameter 'io' di akhir fungsi
+export const handleUserMessage = async (
+  phone,
+  name,
+  text,
+  rawSenderId,
+  locationData = null,
+  io = null
+) => {
   // 1. SETUP USER & REGISTRASI
   let user = await User.findOne({
     where: sequelize.or({ phone: rawSenderId }, { device_id: rawSenderId }),
@@ -59,6 +68,13 @@ export const handleUserMessage = async (phone, name, text, rawSenderId, location
     defaults: { mode: "BOT" },
   });
 
+  // B. Blocking Jika Mode Human Aktif (Bot Diam)
+  if (session.mode === "HUMAN") {
+    // Return null agar bot tidak membalas apa-apa.
+    // Pesan user tetap akan muncul di Dashboard Admin via Socket (di webhookController).
+    return null;
+  }
+
   const redisKey = `session:${realPhone}:draft`;
   const rawDraft = await redisClient.get(redisKey);
   let sessionDraft = rawDraft ? JSON.parse(rawDraft) : {};
@@ -99,11 +115,11 @@ export const handleUserMessage = async (phone, name, text, rawSenderId, location
     };
   }
 
-  // LOGIC PAUSE
-  if (session.mode === "HUMAN" || session.is_paused_until) {
+  // LOGIC PAUSE (Untuk delay bot, beda dengan Human Mode)
+  if (session.is_paused_until) {
     const now = new Date();
-    if (session.is_paused_until && now >= new Date(session.is_paused_until)) {
-      await session.update({ mode: "BOT", is_paused_until: null });
+    if (now >= new Date(session.is_paused_until)) {
+      await session.update({ is_paused_until: null });
     } else {
       return { action: "noop" };
     }
@@ -182,7 +198,7 @@ export const handleUserMessage = async (phone, name, text, rawSenderId, location
       finalReply = activeOrder
         ? `Sama-sama Kak! Pesanan Kakak saat ini *${getStatusMessage(
             activeOrder.status
-          )}*. Ditunggu ya 😃` // ✅ FIXED
+          )}*. Ditunggu ya 😃`
         : "Sama-sama Kak! Kabari saja kalau mau pesan lagi ya.";
     }
 
@@ -228,7 +244,7 @@ export const handleUserMessage = async (phone, name, text, rawSenderId, location
           )}*.\n\nSistem sedang mencarikan kurir terdekat. Mohon tunggu sebentar yah kak...`;
         }
       } else if (activeOrder) {
-        finalReply = `Pesanan Kakak *${getStatusMessage(activeOrder.status)}*. Mohon ditunggu.`; // ✅ FIXED
+        finalReply = `Pesanan Kakak *${getStatusMessage(activeOrder.status)}*. Mohon ditunggu.`;
       } else {
         finalReply = "Siap Kak! Ada yang bisa saya bantu pesankan lagi?";
       }
@@ -239,7 +255,7 @@ export const handleUserMessage = async (phone, name, text, rawSenderId, location
       if (activeOrder) {
         finalReply = `Halo Kak ${sapa(user.name)}, pesanan Kakak saat ini *${getStatusMessage(
           activeOrder.status
-        )}*.\n\nMohon ditunggu ya!`; // ✅ FIXED
+        )}*.\n\nMohon ditunggu ya!`;
       } else if (draftOrder) {
         finalReply = `Kakak punya pesanan Draft yang belum dikonfirmasi nih. Mau dilanjutin?`;
       } else {
