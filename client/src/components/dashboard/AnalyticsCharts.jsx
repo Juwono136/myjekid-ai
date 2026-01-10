@@ -12,6 +12,7 @@ import {
   Cell,
   Legend,
 } from "recharts";
+import { IoPieChartOutline } from "react-icons/io5";
 import { format, parseISO } from "date-fns";
 import { id } from "date-fns/locale";
 import { dashboardService } from "../../services/dashboardService";
@@ -162,13 +163,21 @@ const DistributionChartWidget = () => {
     setLoading(true);
     try {
       const res = await dashboardService.getChartData("distribution", range);
-      const mappedData = res.data.map((item) => ({
-        ...item,
-        color: COLORS[item.name] || "#9CA3AF",
-      }));
+
+      const mappedData = res.data
+        .map((item) => {
+          const statusKey = String(item.name).toUpperCase();
+          return {
+            name: statusKey,
+            value: Number(item.value),
+            color: COLORS[statusKey] || "#9CA3AF",
+          };
+        })
+        .filter((item) => item.value > 0);
+
       setData(mappedData);
     } catch (err) {
-      console.error(err);
+      console.error("Gagal load distribution chart", err);
     } finally {
       setLoading(false);
     }
@@ -214,8 +223,8 @@ const DistributionChartWidget = () => {
           </div>
         ) : !data || data.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-gray-400">
-            <span className="text-4xl mb-2">∅</span>
-            <p className="text-sm">Kosong</p>
+            <IoPieChartOutline className="text-4xl mb-2" />
+            <p className="text-sm">Data tidak ada</p>
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
@@ -233,7 +242,7 @@ const DistributionChartWidget = () => {
                   <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
                 ))}
               </Pie>
-              <Tooltip formatter={(value) => [value, "Order"]} />
+              <Tooltip formatter={(value, name) => [`${value} Order`, name]} separator=" : " />
               <Legend
                 verticalAlign="bottom"
                 height={36}

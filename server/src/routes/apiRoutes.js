@@ -1,6 +1,6 @@
 // src/routes/apiRoutes.js
 import express from "express";
-import { loginAdmin, getMe } from "../controllers/authController.js";
+import { loginAdmin, getMe, updateProfile, updatePassword } from "../controllers/authController.js";
 import {
   getAllAdmins,
   createAdmin,
@@ -72,10 +72,11 @@ router.get("/reports/export/excel", exportTransactionReport);
 
 // 1. Cek Session User
 router.get("/auth/me", getMe);
+router.patch("/auth/profile", updateProfile);
+router.patch("/auth/password", updatePassword);
 
 // 2. User Management (CRUD)
-// GET: Boleh diakses siapa saja yang sudah login (misal CS mau lihat list)
-router.get("/admins", getAllAdmins);
+router.get("/admins", restrictTo("SUPER_ADMIN"), getAllAdmins);
 
 // CUD: Hanya SUPER_ADMIN yang boleh Create, Update, Delete
 router.post("/admins", restrictTo("SUPER_ADMIN"), createAdmin);

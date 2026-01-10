@@ -1,4 +1,5 @@
-import { FiMessageCircle, FiDatabase, FiCpu, FiExternalLink } from "react-icons/fi";
+import { FiMessageCircle, FiDatabase, FiExternalLink } from "react-icons/fi";
+import { FaWhatsapp } from "react-icons/fa";
 import { SiN8N } from "react-icons/si";
 
 const ActionBtn = ({ label, desc, icon: Icon, onClick, colorClass, bgClass }) => (
@@ -60,7 +61,7 @@ const QuickActions = () => {
         <ActionBtn
           label="Chatbot MyJek"
           desc="Buka WA Web untuk chat dengan bot"
-          icon={FiMessageCircle}
+          icon={FaWhatsapp}
           colorClass="text-teal-600"
           bgClass="bg-teal-50"
           onClick={() => window.open("https://web.whatsapp.com", "_blank")}

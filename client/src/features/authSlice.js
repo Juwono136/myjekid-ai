@@ -1,5 +1,6 @@
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import api from "../services/api";
+import { authService } from "../services/authService";
 
 export const loginUser = createAsyncThunk(
   "auth/loginUser",
@@ -19,26 +20,52 @@ export const loginUser = createAsyncThunk(
   }
 );
 
-// ... (Sisa kode slice sama seperti sebelumnya) ...
-// Pastikan extraReducers bagian rejected:
-/*
-.addCase(loginUser.rejected, (state, action) => {
-    state.loading = false;
-    state.error = action.payload?.message || "Login Gagal";
+// 3. [BARU] Update Profile
+export const updateProfile = createAsyncThunk("auth/updateProfile", async (userData, thunkAPI) => {
+  try {
+    return await authService.updateProfile(userData);
+  } catch (error) {
+    const message =
+      (error.response && error.response.data && error.response.data.message) ||
+      error.message ||
+      error.toString();
+    return thunkAPI.rejectWithValue(message);
+  }
 });
-*/
+
+// 4. [BARU] Update Password
+export const updatePassword = createAsyncThunk(
+  "auth/updatePassword",
+  async (passwordData, thunkAPI) => {
+    try {
+      return await authService.updatePassword(passwordData);
+    } catch (error) {
+      const message =
+        (error.response && error.response.data && error.response.data.message) ||
+        error.message ||
+        error.toString();
+      return thunkAPI.rejectWithValue(message);
+    }
+  }
+);
 
 // Jangan lupa export default reducer
 const authSlice = createSlice({
-  // ... config slice ...
   name: "auth",
   initialState: {
     user: JSON.parse(localStorage.getItem("user")) || null,
     token: localStorage.getItem("token") || null,
     loading: false,
-    error: null,
+    error: false,
+    success: false,
   },
   reducers: {
+    reset: (state) => {
+      state.loading = false;
+      state.success = false;
+      state.error = false;
+      state.message = "";
+    },
     logout: (state) => {
       localStorage.removeItem("user");
       localStorage.removeItem("token");
@@ -63,9 +90,55 @@ const authSlice = createSlice({
       .addCase(loginUser.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload?.message || "Login Gagal";
+      })
+      // --- HANDLE UPDATE PROFILE ---
+      .addCase(updateProfile.pending, (state) => {
+        state.loading = true;
+        state.success = false; // Reset status sukses sebelumnya
+        state.error = false;
+      })
+      .addCase(updateProfile.fulfilled, (state, action) => {
+        state.loading = false;
+        state.success = true;
+
+        // FIX: Backend mengembalikan { status: "success", data: { ... } }
+        // Jadi kita harus ambil action.payload.data
+        const updatedUserData = action.payload.data || action.payload;
+
+        if (state.user) {
+          // Merge data lama dengan yang baru
+          state.user = { ...state.user, ...updatedUserData };
+
+          // UPDATE LOCAL STORAGE AGAR PERSISTENT SAAT REFRESH
+          localStorage.setItem("user", JSON.stringify(state.user));
+        }
+        state.message = "Profil berhasil diperbarui.";
+      })
+      .addCase(updateProfile.rejected, (state, action) => {
+        state.loading = false;
+        state.error = true;
+        state.message = action.payload;
+      })
+
+      // --- HANDLE UPDATE PASSWORD ---
+      .addCase(updatePassword.pending, (state) => {
+        state.loading = true;
+        state.success = false;
+        state.error = false;
+      })
+      .addCase(updatePassword.fulfilled, (state, action) => {
+        state.loading = false;
+        state.success = true;
+        // Password tidak return data user, jadi cukup set message
+        state.message = action.payload.message || "Password berhasil diubah.";
+      })
+      .addCase(updatePassword.rejected, (state, action) => {
+        state.loading = false;
+        state.error = true;
+        state.message = action.payload;
       });
   },
 });
 
-export const { logout } = authSlice.actions;
+export const { logout, reset } = authSlice.actions;
 export default authSlice.reducer;

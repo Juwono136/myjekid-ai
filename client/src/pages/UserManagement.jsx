@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { FiEdit2, FiTrash2, FiCalendar } from "react-icons/fi";
+import { FiEdit2, FiTrash2, FiCalendar, FiPhone } from "react-icons/fi";
 import useDebounce from "../hooks/useDebounce";
 import Loader from "../components/Loader";
 import ConfirmationModal from "../components/ConfirmationModal";
@@ -201,6 +201,7 @@ const UserManagement = () => {
               <thead className="bg-gray-50 text-gray-500 font-semibold uppercase text-xs tracking-wider">
                 <tr>
                   <th className="py-4 pl-6">User Profile</th>
+                  <th>Nomor HP</th>
                   <th>Role Access</th>
                   <th>Status</th>
                   <th>Bergabung Sejak</th>
@@ -228,6 +229,14 @@ const UserManagement = () => {
                             </div>
                             <div className="text-xs text-gray-400 font-medium">{u.email}</div>
                           </div>
+                        </div>
+                      </td>
+
+                      {/* NOMOR HP */}
+                      <td>
+                        <div className="flex items-center gap-2 w-max text-gray-600">
+                          <FiPhone className="text-gray-400" />
+                          {u.phone}
                         </div>
                       </td>
 

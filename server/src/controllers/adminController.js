@@ -3,7 +3,11 @@ import { Op, QueryTypes } from "sequelize";
 import bcrypt from "bcryptjs";
 import AppError from "../utils/AppError.js";
 import logger from "../utils/logger.js";
-import { validateEmail, validatePassword } from "../utils/validators.js";
+import {
+  validateAndNormalizePhoneNumber,
+  validateEmail,
+  validatePassword,
+} from "../utils/validators.js";
 
 // API untuk Admin mematikan/menyalakan Bot user tertentu (Switch mode)
 export const setSessionMode = async (req, res) => {
@@ -105,11 +109,11 @@ export const getAllAdmins = async (req, res, next) => {
 // --- 2. CREATE ADMIN (Validation & Hash) ---
 export const createAdmin = async (req, res, next) => {
   try {
-    const { full_name, email, password, role } = req.body;
+    const { full_name, email, password, phone, role } = req.body;
 
     // 1. Validasi Input Wajib
-    if (!full_name || !email || !password) {
-      return next(new AppError("Nama, Email, dan Password wajib diisi.", 400));
+    if (!full_name || !email || !password || !phone) {
+      return next(new AppError("Nama, Email, No. HP dan Password wajib diisi.", 400));
     }
 
     // 2. Validasi Format (Regex)
@@ -120,6 +124,9 @@ export const createAdmin = async (req, res, next) => {
       return next(
         new AppError("Password lemah! Gunakan Huruf Besar, Kecil, Angka, min 8 karakter.", 400)
       );
+    }
+    if (!validateAndNormalizePhoneNumber(phone)) {
+      return next(new AppError("Nomor HP tidak valid.", 400));
     }
 
     // 3. Cek Duplikasi Email
@@ -137,6 +144,7 @@ export const createAdmin = async (req, res, next) => {
       full_name,
       email,
       password_hash,
+      phone,
       role: role || "CS",
       is_active: true,
     });
@@ -267,78 +275,117 @@ export const getDashboardStats = async (req, res, next) => {
 // 2. FUNGSI BARU: KHUSUS UNTUK CHART (INDEPENDEN)
 export const getChartData = async (req, res, next) => {
   try {
-    const { type, range } = req.query; // type: 'revenue' | 'distribution'
+    const type = String(req.query.type || "").toLowerCase();
+    const range = req.query.range || "7days";
 
-    // Tentukan Anchor Date (Logic Future Data / Current Date)
+    if (!["revenue", "distribution"].includes(type)) {
+      return res.status(400).json({
+        status: "fail",
+        message: "Invalid chart type",
+      });
+    }
+
+    // =========================
+    // 1. TENTUKAN ANCHOR DATE
+    // =========================
     let anchorDate = new Date();
-    const lastOrder = await Order.findOne({
-      where: { status: "COMPLETED" },
-      order: [["created_at", "DESC"]],
-      attributes: ["created_at"],
-    });
-    if (lastOrder) anchorDate = new Date(lastOrder.created_at);
 
+    if (type === "revenue") {
+      const lastCompleted = await Order.findOne({
+        where: { status: "COMPLETED" },
+        order: [["created_at", "DESC"]],
+        attributes: ["created_at"],
+      });
+      if (lastCompleted) anchorDate = new Date(lastCompleted.created_at);
+    } else {
+      const lastOrder = await Order.findOne({
+        order: [["created_at", "DESC"]],
+        attributes: ["created_at"],
+      });
+      if (lastOrder) anchorDate = new Date(lastOrder.created_at);
+    }
+
+    // =========================
+    // 2. START DATE
+    // =========================
     let startDate = new Date(anchorDate);
 
-    // Logic Range
     if (range === "30days") startDate.setDate(anchorDate.getDate() - 29);
     else if (range === "1year") startDate.setFullYear(anchorDate.getFullYear() - 1);
-    else startDate.setDate(anchorDate.getDate() - 6); // Default 7 days
+    else startDate.setDate(anchorDate.getDate() - 6);
 
     startDate.setHours(0, 0, 0, 0);
 
     let resultData = [];
 
+    // =========================
+    // 3. REVENUE
+    // =========================
     if (type === "revenue") {
-      // --- LOGIC REVENUE CHART ---
       const rawData = await sequelize.query(
-        `SELECT DATE(created_at) as date, SUM(total_amount) as income 
-           FROM orders 
-           WHERE status = 'COMPLETED' AND created_at >= :startDate AND created_at <= :endDate
-           GROUP BY DATE(created_at) ORDER BY DATE(created_at) ASC`,
-        { replacements: { startDate, endDate: anchorDate }, type: QueryTypes.SELECT }
+        `
+        SELECT DATE(created_at) AS date, SUM(total_amount) AS income
+        FROM orders
+        WHERE status = 'COMPLETED'
+          AND created_at >= :startDate
+          AND created_at <= :endDate
+        GROUP BY DATE(created_at)
+        ORDER BY DATE(created_at) ASC
+        `,
+        {
+          replacements: { startDate, endDate: anchorDate },
+          type: QueryTypes.SELECT,
+        }
       );
 
-      // Zero Filling
-      const diffTime = Math.abs(anchorDate - startDate);
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      const loopDays = diffDays > 366 ? 366 : diffDays + 1;
+      const diffDays = Math.ceil((anchorDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
 
-      for (let i = 0; i < loopDays; i++) {
+      for (let i = 0; i < diffDays; i++) {
         const d = new Date(startDate);
         d.setDate(d.getDate() + i);
         const dateString = d.toLocaleDateString("en-CA");
-        const match = rawData.find((r) => {
-          const rd =
-            typeof r.date === "string"
-              ? r.date.substring(0, 10)
-              : new Date(r.date).toLocaleDateString("en-CA");
-          return rd === dateString;
-        });
+
+        const match = rawData.find((r) => String(r.date).substring(0, 10) === dateString);
 
         resultData.push({
           date: dateString,
-          displayDate: d.toISOString(), // Kirim ISO string agar frontend bisa format sendiri
-          income: match ? parseFloat(match.income) : 0,
+          displayDate: d.toISOString(),
+          income: match ? Number(match.income) : 0,
         });
       }
-    } else if (type === "distribution") {
-      // --- LOGIC DONUT CHART ---
+    }
+
+    // =========================
+    // 4. DISTRIBUTION (AMAN)
+    // =========================
+    else {
       const rawStatus = await sequelize.query(
-        `SELECT status, COUNT(*) as count FROM orders 
-           WHERE created_at >= :startDate AND created_at <= :endDate
-           GROUP BY status`,
-        { replacements: { startDate, endDate: anchorDate }, type: QueryTypes.SELECT }
+        `
+        SELECT status, COUNT(*) AS count
+        FROM orders
+        WHERE created_at >= :startDate
+          AND created_at <= :endDate
+        GROUP BY status
+        `,
+        {
+          replacements: { startDate, endDate: anchorDate },
+          type: QueryTypes.SELECT,
+        }
       );
 
+      // Normalisasi di JS (AMAN)
       resultData = rawStatus.map((r) => ({
-        name: r.status,
-        value: parseInt(r.count, 10),
+        name: String(r.status).toUpperCase(),
+        value: Number(r.count),
       }));
     }
 
-    res.status(200).json({ status: "success", data: resultData });
+    res.status(200).json({
+      status: "success",
+      data: resultData,
+    });
   } catch (error) {
+    console.error("[CHART ERROR]", error);
     next(error);
   }
 };

@@ -49,7 +49,9 @@ const RevenueChart = ({ data }) => {
               tick={{ fontSize: 12 }}
             />
             <YAxis
-              tickFormatter={(num) => `${num / 1000}k`}
+              tickFormatter={(val) =>
+                val >= 1000000 ? `${(val / 1000000).toFixed(1)}jt` : `${val / 1000}rb`
+              }
               stroke="#9ca3af"
               tick={{ fontSize: 12 }}
             />

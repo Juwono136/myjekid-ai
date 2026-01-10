@@ -11,6 +11,7 @@ const UserFormModal = ({ isOpen, onClose, mode, initialData, onSubmit }) => {
     full_name: "",
     email: "",
     password: "", // Hanya dipakai saat ADD
+    phone: "",
     role: "CS",
     is_active: true,
   });
@@ -22,12 +23,20 @@ const UserFormModal = ({ isOpen, onClose, mode, initialData, onSubmit }) => {
         full_name: initialData.full_name,
         email: initialData.email,
         role: initialData.role,
+        phone: initialData.phone,
         is_active: initialData.is_active,
         password: "", // Password kosongkan saat edit
       });
     } else {
       // Reset saat Add Mode
-      setFormData({ full_name: "", email: "", password: "", role: "CS", is_active: true });
+      setFormData({
+        full_name: "",
+        email: "",
+        password: "",
+        phone: "",
+        role: "CS",
+        is_active: true,
+      });
     }
   }, [mode, initialData, isOpen]);
 
@@ -98,6 +107,28 @@ const UserFormModal = ({ isOpen, onClose, mode, initialData, onSubmit }) => {
                 value={formData.email}
                 onChange={handleChange}
                 placeholder="email@myjek.com"
+              />
+            </div>
+
+            {/* phone */}
+            <div className="form-control">
+              <label className="label text-xs font-bold text-gray-500 uppercase">
+                No. WhatsApp
+              </label>
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={15}
+                required
+                value={formData.phone}
+                disabled={isEdit}
+                onChange={(e) => {
+                  const onlyNumbers = e.target.value.replace(/\D/g, "");
+                  setFormData({ ...formData, phone: onlyNumbers });
+                }}
+                className="input input-bordered w-full rounded-xl focus:border-orange-500 focus:outline-none font-mono"
+                placeholder="62812xxxx"
               />
             </div>
 

@@ -8,13 +8,13 @@ import MainLayout from "./layouts/MainLayout";
 import DashboardHome from "./pages/DashboardHome";
 import UserManagement from "./pages/UserManagement";
 import RoleBasedRoute from "./components/RoleBasedRoute";
-import Settings from "./pages/Settings";
 import CourierManagement from "./pages/CourierManagement";
 import LiveMap from "./pages/LiveMap";
 import ProtectedRoute from "./components/ProtectedRoute";
 import OrderMonitor from "./pages/OrderMonitor";
 import InterventionPage from "./pages/InterventionPage";
 import ReportsPage from "./pages/ReportsPage";
+import SettingsPage from "./pages/SettingsPage";
 
 // Placeholder Pages (Untuk Menu Lain yang belum dibuat)
 const PlaceholderPage = ({ title }) => (
@@ -59,7 +59,7 @@ function App() {
                 </RoleBasedRoute>
               }
             />
-            <Route path="settings" element={<Settings />} />
+            <Route path="settings" element={<SettingsPage />} />
           </Route>
         </Route>
 

@@ -60,7 +60,7 @@ const TransactionTable = ({ transactions, page, totalPages, onPageChange }) => {
                   {/* Order ID */}
                   <td className="px-6 py-4">
                     <span className="font-mono text-xs font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded">
-                      #{t.order_id.substring(0, 8)}...
+                      {t.order_id}
                     </span>
                   </td>
 
