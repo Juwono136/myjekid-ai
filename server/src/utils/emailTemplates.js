@@ -13,14 +13,13 @@ export const getHandoffEmailTemplate = (data) => {
         .header { background-color: #f14c06; color: #fff; padding: 20px; text-align: center; }
         .content { padding: 30px; }
         .alert-box { background-color: #fff4e5; border-left: 5px solid #f14c06; padding: 15px; margin: 20px 0; font-style: italic; color: #555; }
-        .btn { display: inline-block; background-color: #f14c06; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; margin-top: 20px; }
-        .footer { background-color: #333; color: #888; text-align: center; padding: 15px; font-size: 12px; }
+        .footer { background-color: #333; color: #fff; text-align: center; padding: 15px; font-size: 12px; }
       </style>
     </head>
     <body>
       <div class="container">
         <div class="header">
-          <h2 style="margin:0;">🚨 Butuh Bantuan Admin</h2>
+          <h2 style="margin:0;">Butuh Bantuan Admin!</h2>
         </div>
         <div class="content">
           <p>Halo Admin,</p>
@@ -44,8 +43,20 @@ export const getHandoffEmailTemplate = (data) => {
           <p>Bot telah dimatikan sementara untuk user ini. Silakan ambil alih percakapan melalui dashboard.</p>
           
           <div style="text-align: center;">
-            <a href="${dashboardUrl}" class="btn">Buka Intervention Mode</a>
-          </div>
+            <a href="${dashboardUrl}" target="_blank"
+              style="
+                display: inline-block;
+                background-color: #f14c06;
+                color: #ffffff !important;
+                padding: 12px 24px;
+                text-decoration: none;
+                border-radius: 5px;
+                font-weight: bold;
+                margin-top: 20px;
+              ">
+              Buka Intervention Mode
+            </a>
+        </div>
         </div>
         <div class="footer">
           &copy; ${new Date().getFullYear()} MyJek Admin System. All rights reserved.

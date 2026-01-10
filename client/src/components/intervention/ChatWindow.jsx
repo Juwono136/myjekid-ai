@@ -67,7 +67,7 @@ const ChatWindow = ({ session, messages = [], isLoadingHistory, onBack, onSendMe
 
   return (
     // FIX CSS MOBILE: h-full (atau h-[100dvh] jika browser mobile address bar masalah)
-    <div className="flex flex-col w-full h-dvh bg-white relative">
+    <div className="flex flex-col w-full h-dvh bg-white relative mb-16 md:mb-0">
       {/* 1. Modal */}
       <ModeToggleModal
         isOpen={isModalOpen}

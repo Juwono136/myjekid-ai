@@ -18,13 +18,23 @@ import {
 import { verifyToken } from "../middleware/authMiddleware.js";
 import { restrictTo } from "../middleware/roleMiddleware.js";
 import { getAllOrders, getOrderById } from "../controllers/orderController.js";
-import { getNotifications, markAsRead } from "../controllers/notificationController.js";
+import {
+  getNotifications,
+  markAllAsRead,
+  markAsRead,
+} from "../controllers/notificationController.js";
 import {
   getActiveSessions,
   getChatHistory,
   sendMessageToUser,
   toggleSessionMode,
 } from "../controllers/interventionController.js";
+import {
+  exportTransactionReport,
+  getReportSummary,
+  getRevenueChart,
+  getTransactionReports,
+} from "../controllers/reportController.js";
 
 const router = express.Router();
 
@@ -43,15 +53,22 @@ router.get("/dashboard/chart", getChartData);
 router.get("/orders", getAllOrders);
 router.get("/orders/:id", getOrderById);
 
-// NOTIFICATION ROUTES
-router.get("/notifications", getNotifications);
-router.put("/notifications/:id/read", markAsRead);
-
 // --- INTERVENTION ROUTES ---
 router.get("/intervention/sessions", getActiveSessions);
 router.get("/intervention/history/:phone", getChatHistory);
 router.post("/intervention/send", sendMessageToUser);
 router.post("/intervention/toggle-mode", toggleSessionMode);
+
+// NOTIFICATION ROUTES
+router.get("/notifications", getNotifications);
+router.patch("/notifications/read-all", markAllAsRead);
+router.patch("/notifications/:id/read", markAsRead);
+
+// === REPORT & ANALYTICS ROUTES ===
+router.get("/reports/summary", getReportSummary);
+router.get("/reports/chart", getRevenueChart);
+router.get("/reports/transactions", getTransactionReports);
+router.get("/reports/export/excel", exportTransactionReport);
 
 // 1. Cek Session User
 router.get("/auth/me", getMe);

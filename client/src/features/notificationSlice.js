@@ -1,94 +1,100 @@
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import notificationService from "../services/notificationService";
 
+// Async Thunk: Fetch Data
 export const fetchNotifications = createAsyncThunk(
-  "notifications/fetchAll",
-  async (params, thunkAPI) => {
+  "notifications/fetch",
+  async ({ page, limit, search, isLoadMore = false }, thunkAPI) => {
     try {
-      // params: { page, limit, search, startDate, endDate }
-      const response = await notificationService.getAll(params);
-      return {
-        data: response.data,
-        isLoadMore: params.page > 1, // Flag untuk menentukan replace atau append
-      };
+      const response = await notificationService.getNotifications(page, limit, search);
+      // Return payload gabungan data API + flag isLoadMore
+      return { ...response, isLoadMore };
     } catch (error) {
-      const message = error.response?.data?.message || error.message;
-      return thunkAPI.rejectWithValue(message);
+      return thunkAPI.rejectWithValue(error.response?.data?.message || error.message);
     }
   }
 );
 
-export const markNotifRead = createAsyncThunk("notifications/markRead", async (id, thunkAPI) => {
-  try {
+// Async Thunk: Mark Read
+export const markNotificationAsRead = createAsyncThunk(
+  "notifications/markRead",
+  async (id, thunkAPI) => {
     await notificationService.markAsRead(id);
-    return id;
-  } catch (error) {
-    return thunkAPI.rejectWithValue(error.message);
+    return id; // Return ID agar reducer bisa update state lokal
   }
-});
+);
 
-const initialState = {
-  items: [],
-  unreadCount: 0,
-  currentPage: 1,
-  totalPages: 1,
-  isLoading: false,
-  error: null,
-};
+// Async Thunk: Mark All Read
+export const markAllNotificationsRead = createAsyncThunk(
+  "notifications/markAllRead",
+  async (_, thunkAPI) => {
+    await notificationService.markAllAsRead();
+    return true;
+  }
+);
 
 const notificationSlice = createSlice({
   name: "notifications",
-  initialState,
+  initialState: {
+    items: [],
+    unreadCount: 0,
+    totalItems: 0,
+    isLoading: false,
+    hasMore: true,
+  },
   reducers: {
-    // Action untuk Socket.io: Notifikasi baru masuk
+    // Action untuk Socket.IO
     addRealtimeNotification: (state, action) => {
-      state.items.unshift(action.payload); // Tambah di paling atas
+      state.items.unshift(action.payload); // Tambah ke atas
       state.unreadCount += 1;
-    },
-    // Reset list saat search/filter berubah (agar lazy load mulai dari awal)
-    resetNotifications: (state) => {
-      state.items = [];
-      state.currentPage = 1;
-      state.totalPages = 1;
+      state.totalItems += 1;
     },
   },
   extraReducers: (builder) => {
     builder
+      // --- FETCH ---
       .addCase(fetchNotifications.pending, (state) => {
         state.isLoading = true;
       })
       .addCase(fetchNotifications.fulfilled, (state, action) => {
         state.isLoading = false;
-        const { items, unreadCount, currentPage, totalPages } = action.payload.data;
-        const isLoadMore = action.payload.isLoadMore;
+        const { data, isLoadMore } = action.payload; // Akses properti 'data' dari response backend
+        const newItems = data?.items || [];
 
         if (isLoadMore) {
-          // Lazy Load: Gabungkan data lama + baru
-          state.items = [...state.items, ...items];
+          // Lazy Load: Append data & filter duplikat
+          const uniqueItems = newItems.filter(
+            (n) => !state.items.some((existing) => existing.id === n.id)
+          );
+          state.items = [...state.items, ...uniqueItems];
         } else {
-          // First Load / Filter: Timpa data
-          state.items = items;
+          // Initial Load / Search: Replace data
+          state.items = newItems;
         }
 
-        state.unreadCount = unreadCount;
-        state.currentPage = currentPage;
-        state.totalPages = totalPages;
-      })
-      .addCase(fetchNotifications.rejected, (state, action) => {
-        state.isLoading = false;
-        state.error = action.payload;
+        state.totalItems = data?.totalItems || 0;
+        state.unreadCount = data?.unreadCount || 0;
+        state.hasMore = state.items.length < state.totalItems;
       })
 
-      .addCase(markNotifRead.fulfilled, (state, action) => {
-        const id = action.payload;
-        const item = state.items.find((n) => n.id === id);
+      // --- MARK READ (Optimistic UI) ---
+      // UI update duluan sebelum API selesai agar responsif
+      .addCase(markNotificationAsRead.pending, (state, action) => {
+        const id = action.meta.arg;
+        const item = state.items.find((i) => i.id === id);
         if (item && !item.is_read) {
           item.is_read = true;
           state.unreadCount = Math.max(0, state.unreadCount - 1);
         }
+      })
+
+      // --- MARK ALL READ ---
+      .addCase(markAllNotificationsRead.pending, (state) => {
+        state.items.forEach((i) => (i.is_read = true));
+        state.unreadCount = 0;
       });
   },
 });
 
-export const { addRealtimeNotification, resetNotifications } = notificationSlice.actions;
+export const { addRealtimeNotification } = notificationSlice.actions;
 export default notificationSlice.reducer;

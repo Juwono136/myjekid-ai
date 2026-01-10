@@ -115,7 +115,7 @@ const InterventionPage = () => {
 
   // --- LAYOUT FIXES ---
   return (
-    <div className="flex flex-row h-[calc(100vh-64px)] md:h-[calc(100vh-100px)] w-full bg-gray-100 overflow-hidden">
+    <div className="flex flex-row h-[calc(100vh-120px)] w-full shadow-lg rounded-md bg-gray-100 overflow-hidden">
       {/* Sidebar Wrapper */}
       <div
         className={`

@@ -4,6 +4,8 @@ import { handleUserMessage } from "../services/flows/userFlow.js";
 import { handleCourierMessage } from "../services/flows/courierFlow.js";
 import { redisClient } from "../config/redisClient.js";
 import { sanitizePhoneNumber } from "../utils/formatter.js";
+import { createSystemNotification } from "./notificationController.js";
+import logger from "../utils/logger.js";
 
 // --- HELPERS ---
 const sanitizeId = (id) => (id ? id.split("@")[0] : "");
@@ -336,7 +338,47 @@ export const handleIncomingMessage = async (req, res) => {
     if (n8nResponse) return res.json(n8nResponse);
     return res.status(200).json({ status: "no_response_needed" });
   } catch (error) {
-    console.error("❌ Webhook Error:", error);
-    return res.status(500).json({ error: error.message });
+    logger.error(`❌ Error Processing Webhook: ${error.message}`);
+
+    // --- SAFETY NET: AUTOMATIC HANDOFF SAAT ERROR ---
+    try {
+      // 1. Identifikasi Nomor HP User dari body request (karena variabel existingUser mungkin undefined jika error di awal)
+      const rawId = req.body?.payload?.from || req.body?.payload?.chatId || "";
+      const phone = sanitizePhoneNumber(sanitizeId(rawId));
+
+      if (phone) {
+        // 2. Update Mode ke HUMAN di Database
+        // Kita cari atau buat sesi darurat jika belum ada
+        let session = await ChatSession.findOne({ where: { phone } });
+
+        // Hanya lakukan handoff jika mode saat ini masih BOT
+        if (session && session.mode === "BOT") {
+          await session.update({
+            mode: "HUMAN",
+            is_paused_until: null, // Reset pause agar admin bisa langsung masuk
+          });
+
+          // 3. Kirim Notifikasi & Email ke Admin
+          // (Menggunakan helper yang sama dengan Intervention Controller)
+          await createSystemNotification(req.io, {
+            title: "SYSTEM CRASH: Bot Gagal Memproses Pesan!",
+            message: `Terjadi error kritis pada Bot: "${error.message}". Mode otomatis dialihkan ke HUMAN untuk user ${phone}. Segera lakukan tindakan atau chat user tersebut untuk dibantu!`,
+            type: "HUMAN_HANDOFF", // Tipe ini memicu Email
+            referenceId: phone,
+            actionUrl: `/dashboard/chat`,
+            extraData: { userName: session.user_name || "User" }, // Ambil nama jika ada
+          });
+
+          logger.info(`Emergency Handoff triggered for ${phone}`);
+        }
+      }
+    } catch (innerError) {
+      console.error("Gagal menjalankan Safety Net:", innerError);
+    }
+    // ------------------------------------------------
+
+    // Tetap return status 500 atau 200 agar WAHA tidak me-retry terus menerus (tergantung strategi Anda)
+    // Disarankan 200 agar tidak looping error di WAHA
+    return res.status(200).json({ status: "error", message: "Error handled gracefully" });
   }
 };

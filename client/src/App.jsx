@@ -14,6 +14,7 @@ import LiveMap from "./pages/LiveMap";
 import ProtectedRoute from "./components/ProtectedRoute";
 import OrderMonitor from "./pages/OrderMonitor";
 import InterventionPage from "./pages/InterventionPage";
+import ReportsPage from "./pages/ReportsPage";
 
 // Placeholder Pages (Untuk Menu Lain yang belum dibuat)
 const PlaceholderPage = ({ title }) => (
@@ -46,7 +47,7 @@ function App() {
             <Route path="map" element={<LiveMap />} />
             <Route path="orders" element={<OrderMonitor />} />
             <Route path="chat" element={<InterventionPage />} />
-            <Route path="reports" element={<PlaceholderPage title="Laporan Transaksi" />} />
+            <Route path="reports" element={<ReportsPage />} />
             <Route path="couriers" element={<CourierManagement />} />
 
             {/* Role Based Route tetap digunakan di dalam sini untuk proteksi spesifik */}

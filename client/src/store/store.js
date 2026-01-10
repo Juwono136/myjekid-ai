@@ -5,6 +5,7 @@ import dashboardReducer from "../features/dashboardSlice";
 import orderReducer from "../features/orderSlice";
 import interventionReducer from "../features/interventionSlice";
 import notificationReducer from "../features/notificationSlice";
+import reportReducer from "../features/reportSlice";
 
 export const store = configureStore({
   reducer: {
@@ -14,5 +15,6 @@ export const store = configureStore({
     orders: orderReducer,
     intervention: interventionReducer,
     notifications: notificationReducer,
+    reports: reportReducer,
   },
 });

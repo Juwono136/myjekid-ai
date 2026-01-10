@@ -1,16 +1,24 @@
-import api from "./api";
+import api from "./api"; // Pastikan path axios instance Anda benar
 
 const notificationService = {
-  // GET: Ambil notifikasi (Pagination, Search, Filter Date)
-  getAll: async (params) => {
-    // params: { page, limit, search, startDate, endDate }
-    const response = await api.get("/notifications", { params });
-    return response.data; // { status: "success", data: { items, unreadCount, ... } }
+  // GET Data (Pagination & Search)
+  getNotifications: async (page = 1, limit = 10, search = "") => {
+    const response = await api.get("/notifications", {
+      params: { page, limit, search },
+    });
+    // Response Backend: { status: "success", data: { items: [], unreadCount: 0, ... } }
+    return response.data;
   },
 
-  // PUT: Tandai sudah dibaca
+  // Mark Single Read
   markAsRead: async (id) => {
-    const response = await api.put(`/notifications/${id}/read`);
+    const response = await api.patch(`/notifications/${id}/read`);
+    return response.data;
+  },
+
+  // Mark All Read
+  markAllAsRead: async () => {
+    const response = await api.patch("/notifications/read-all");
     return response.data;
   },
 };
