@@ -4,7 +4,7 @@ services:
   backend:
     image: juwono136/myjekid-api:latest
     pull_policy: always
-    container_name: myjekid-api
+    container_name: myjek-api
     restart: always
     environment:
       # SERVER CONFIG
@@ -63,9 +63,9 @@ services:
       - tunnel
 
   frontend:
-    image: juwono136/myjekid-frontend:latest
+    image: juwono136/myjek-frontend:latest
     pull_policy: always
-    container_name: myjekid-frontend
+    container_name: myjek-frontend
     restart: always
     depends_on:
       - backend
