@@ -58,9 +58,6 @@ io.engine.on("connection_error", (err) => {
 app.use(helmet());
 app.use(cors());
 
-// --- FIX LOGGER (MORGAN) ---
-// Masalah log "::1" atau error parsing terjadi karena request Socket.io ikut tercatat.
-// Kita SKIP request yang url-nya mengandung "/socket.io"
 app.use(
   morgan(
     (tokens, req, res) => {
