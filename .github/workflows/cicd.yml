@@ -49,11 +49,11 @@ jobs:
 
             - name: Stop and Remove Old Containers
               run: |
-                  docker-compose down || true
+                  docker compose down || true
 
             - name: Run New Containers
               run: |
-                  docker-compose up -d --remove-orphans
+                  docker compose up -d --remove-orphans
               env:
                   # SERVER CONFIG
                   PORT: ${{ secrets.PORT }}
