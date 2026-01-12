@@ -1,10 +1,10 @@
-import { Courier } from "../models/index.js"; // Import dari sentral model
+import { Courier } from "../models/index.js";
 import { Op } from "sequelize";
 import AppError from "../utils/AppError.js";
-import logger from "../utils/logger.js"; // Import Logger Anda
-import { sanitizePhoneNumber } from "../utils/formatter.js"; // Reuse function lama
+import logger from "../utils/logger.js";
+import { sanitizePhoneNumber } from "../utils/formatter.js";
 
-// --- 1. GET ALL COURIERS (Monitor) ---
+// Get all couriers
 export const getAllCouriers = async (req, res, next) => {
   try {
     const {
@@ -19,12 +19,10 @@ export const getAllCouriers = async (req, res, next) => {
 
     const offset = (page - 1) * limit;
 
-    // Filter Logic
     const whereClause = {};
 
     // Search (Nama atau No HP)
     if (search) {
-      // Kita coba bersihkan search query juga, siapa tahu admin search pake 08xxx
       const cleanSearchPhone = sanitizePhoneNumber(search);
 
       whereClause[Op.or] = [
@@ -77,40 +75,39 @@ export const getAllCouriers = async (req, res, next) => {
   }
 };
 
-// --- 2. CREATE COURIER (Registrasi) ---
+// Create courier
 export const createCourier = async (req, res, next) => {
   try {
     const { name, phone, shift_code } = req.body;
 
-    // 1. Validasi Basic
+    // Validasi Basic
     if (!name || !phone) {
       return next(new AppError("Nama dan No HP wajib diisi.", 400));
     }
 
-    // 2. Sanitasi Nomor HP (PENTING: Agar match dengan WA Bot)
     const cleanPhone = sanitizePhoneNumber(phone);
     if (!cleanPhone) {
-      logger.warn(`Admin gagal input kurir. No HP tidak valid: ${phone}`);
+      logger.warn(`Admin failed to input courier. Invalid mobile number: ${phone}`);
       return next(new AppError("Format Nomor HP tidak valid (Min 10-15 digit).", 400));
     }
 
-    // 3. Cek Duplikat
+    // Cek Duplikat
     const existing = await Courier.findOne({ where: { phone: cleanPhone } });
     if (existing) {
-      logger.warn(`Percobaan duplikasi data kurir: ${cleanPhone}`);
+      logger.warn(`Courier data duplication: ${cleanPhone}`);
       return next(new AppError(`No HP ${cleanPhone} sudah terdaftar.`, 400));
     }
 
-    // 4. Create Data
+    // Create Data
     const newCourier = await Courier.create({
       name,
-      phone: cleanPhone, // Simpan format 628xxx
+      phone: cleanPhone,
       shift_code: shift_code || 1,
       status: "OFFLINE",
       is_active: true,
     });
 
-    logger.info(`Kurir baru ditambahkan oleh Admin: ${name} (${cleanPhone})`);
+    logger.info(`New courier added by Admin: ${name} (${cleanPhone})`);
 
     res.status(201).json({
       status: "success",
@@ -123,7 +120,7 @@ export const createCourier = async (req, res, next) => {
   }
 };
 
-// --- 3. UPDATE COURIER ---
+// Update courier
 export const updateCourier = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -136,7 +133,6 @@ export const updateCourier = async (req, res, next) => {
     // Update Name
     if (name) courier.name = name;
 
-    // Update Phone (Harus sanitasi ulang & Cek duplikat jika berubah)
     if (phone) {
       const cleanPhone = sanitizePhoneNumber(phone);
       if (!cleanPhone) {
@@ -166,7 +162,7 @@ export const updateCourier = async (req, res, next) => {
 
     await courier.save();
 
-    logger.info(`Data kurir diupdate: ${courier.name} (ID: ${id})`);
+    logger.info(`Courier data updated: ${courier.name} (ID: ${id})`);
 
     if (req.io && locationChanged) {
       req.io.emit("courier-location-update", {
@@ -191,7 +187,7 @@ export const updateCourier = async (req, res, next) => {
   }
 };
 
-// --- 4. DELETE COURIER ---
+// Delete courier
 export const deleteCourier = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -199,7 +195,7 @@ export const deleteCourier = async (req, res, next) => {
 
     if (!deleted) return next(new AppError("Kurir tidak ditemukan", 404));
 
-    logger.info(`Kurir dihapus permanen.`);
+    logger.info(`Courier permanently deleted.`);
 
     res.status(200).json({
       status: "success",

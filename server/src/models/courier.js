@@ -36,8 +36,6 @@ const Courier = sequelize.define(
       type: DataTypes.STRING(50),
       allowNull: true,
     },
-
-    // Lokasi Kurir Real-time
     current_latitude: { type: DataTypes.DOUBLE },
     current_longitude: { type: DataTypes.DOUBLE },
 

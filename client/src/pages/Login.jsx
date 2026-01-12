@@ -3,6 +3,7 @@ import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import { loginUser } from "../features/authSlice";
 import toast from "react-hot-toast";
+import logoImg from "../assets/logo.png";
 
 // Icons
 import { FiMail, FiLock, FiEye, FiEyeOff, FiArrowRight } from "react-icons/fi";
@@ -91,8 +92,8 @@ const Login = () => {
 
           <div className="relative z-10 flex flex-col items-center text-center">
             {/* Logo Placeholder - Text based for now */}
-            <div className="bg-white text-[#c73d06] w-20 h-20 rounded-2xl flex items-center justify-center text-4xl font-black shadow-lg mb-6 rotate-3 hover:rotate-0 transition-all duration-300">
-              M
+            <div className="bg-white text-[#c73d06] w-28 h-28 rounded-2xl flex items-center justify-center text-4xl font-black shadow-lg mb-6 rotate-3 hover:rotate-0 transition-all duration-300">
+              <img src={logoImg} alt="logo-image" className="p-3" />
             </div>
 
             <h1 className="text-4xl font-bold mb-2 tracking-tight">MyJek Admin</h1>
@@ -100,7 +101,7 @@ const Login = () => {
 
             <div className="mt-10 px-6 py-4 bg-white/10 backdrop-blur-sm rounded-xl border border-white/20">
               <p className="text-sm font-medium">
-                "Kelola order dan kurir secara otomatis dengan AI."
+                "Kelola order dan kurir secara otomatis dengan Smart Chatbot"
               </p>
             </div>
           </div>
@@ -191,8 +192,9 @@ const Login = () => {
 
           <div className="mt-10 pt-6 border-t border-gray-100 text-center">
             <p className="text-xs text-gray-400">
-              MyJek Admin System v1.0 <br />
-              &copy; {new Date().getFullYear()} Protected Automation.
+              MyJek Admin System
+              <br />
+              &copy; {new Date().getFullYear()} All right reserved
             </p>
           </div>
         </div>

@@ -8,7 +8,6 @@ import { dispatchService } from "../dispatchService.js";
 import { sanitizePhoneNumber } from "../../utils/formatter.js";
 import { storageService } from "../storageService.js";
 
-// --- HELPERS ---
 const toIDR = (num) =>
   new Intl.NumberFormat("id-ID", {
     style: "currency",
@@ -39,13 +38,11 @@ const getDashboardReply = (courier) => {
   );
 };
 
-// --- FINALISASI TAGIHAN ---
 const executeBillFinalization = async (courier, orderId) => {
   try {
     console.log(`🏁 Finalizing Order: ${orderId} by Courier: ${courier.name}`);
 
-    // 1. Finalisasi via Service (Memindahkan Draft -> Real Data di DB)
-    // Ini memastikan 'invoice_image_url' dan 'total_amount' terupdate di DB
+    // Finalisasi via Service (Memindahkan Draft -> Real Data di DB)
     const order = await orderService.finalizeBill(orderId);
 
     if (!order) {
@@ -53,12 +50,10 @@ const executeBillFinalization = async (courier, orderId) => {
       return { reply: "❌ Gagal memproses data tagihan. Order tidak ditemukan." };
     }
 
-    // 2. Fetch User Manual (Anti-Crash Logic)
-    // Kita ambil data user berdasarkan user_phone karena di tabel orders kamu relasinya via phone
-    // (Berdasarkan file webhookController.js kamu sebelumnya, user dicari by phone)
+    // Fetch User Manual (Anti-Crash Logic)
     let user = await User.findOne({ where: { phone: order.user_phone } });
 
-    // Fallback: Coba cari via user_id jika ada (untuk jaga-jaga)
+    // Cari via user_id jika ada
     if (!user && order.user_id) {
       user = await User.findByPk(order.user_id);
     }
@@ -68,24 +63,22 @@ const executeBillFinalization = async (courier, orderId) => {
       return { reply: "⚠️ Order tersimpan, tapi data User hilang. Tidak bisa kirim notif." };
     }
 
-    // 3. Hitung Total Final (Sesuai Kolom DB: total_amount)
+    // Hitung Total Final
     const finalTotal = parseFloat(order.total_amount || 0);
 
-    // 4. Update Status Order
-    // Karena kolomnya hanya status
+    // Update Status Order
     await order.update({
       status: "BILL_SENT",
     });
 
-    // 5. Siapkan URL Gambar untuk N8N
-    // Pastikan BASE_IMAGE_URL mengarah ke MinIO Localhost/IP Docker
+    // Siapkan URL Gambar untuk N8N
     let imageUrl = order.invoice_image_url;
     // Jika di DB cuma nama file (cth: invoice_123.jpg), gabungkan dengan Base URL
     if (imageUrl && !imageUrl.startsWith("http")) {
       imageUrl = `${BASE_IMAGE_URL}/${imageUrl}`;
     }
 
-    // 6. Pesan Caption untuk User (Disederhanakan)
+    // Pesan Caption untuk User (Disederhanakan)
     const userCaption =
       `✅ *ORDER SELESAI DIBELANJAKAN!*\n` +
       `Halo Kak ${user.name}, pesanan sudah dibeli oleh kurir bernama ${courier.name}.\n\n` +
@@ -94,7 +87,7 @@ const executeBillFinalization = async (courier, orderId) => {
       `Mohon siapkan uang pas ya Kak. Driver segera meluncur! 🛵\n` +
       `📸 *LINK FOTO STRUK/NOTA TERLAMPIR DIBAWAH INI 👇*`;
 
-    // 7. Kirim Notifikasi ke Kurir (Direct Message)
+    // Kirim Notifikasi ke Kurir (Direct Message)
     const courierMsg =
       `✅ *TAGIHAN TERKONFIRMASI!*\n` +
       `Nominal: ${toIDR(finalTotal)}\n\n` +
@@ -104,8 +97,7 @@ const executeBillFinalization = async (courier, orderId) => {
 
     await messageService.sendMessage(courier.phone, courierMsg);
 
-    // 8. Return Action ke Controller (Untuk Trigger N8N Kirim Gambar ke User)
-    // Ini kuncinya agar Chatbot yang kirim gambar, bukan Kurir manual.
+    // Return Action ke Controller (Untuk Trigger N8N Kirim Gambar ke User)
     return {
       action: "trigger_n8n_image",
       data: {
@@ -120,10 +112,10 @@ const executeBillFinalization = async (courier, orderId) => {
   }
 };
 
-// --- HANDLE UPDATE LOKASI (Function Standalone) ---
+// HANDLE UPDATE LOKASI
 export const handleCourierLocation = async (courier, lat, lng, io) => {
   try {
-    // 1. Update Database
+    // Update Database
     await courier.update({
       current_latitude: lat,
       current_longitude: lng,
@@ -132,7 +124,7 @@ export const handleCourierLocation = async (courier, lat, lng, io) => {
 
     console.log(`📍 DB Updated: ${courier.name} -> [${lat}, ${lng}]`);
 
-    // 2. Emit ke Socket.io (Untuk Live Map)
+    // Emit ke Socket.io (Untuk Live Map)
     if (io) {
       io.emit("courier-location-update", {
         id: courier.id,
@@ -151,30 +143,26 @@ export const handleCourierLocation = async (courier, lat, lng, io) => {
   }
 };
 
-// --- MAIN HANDLER ---
+// MAIN HANDLER
 export const handleCourierMessage = async (
   courier,
   text,
   mediaUrl = null,
   rawSenderId = null,
   rawBase64 = null,
-  locationArg = null, // Argumen lokasi eksplisit
+  locationArg = null,
   io = null
 ) => {
   try {
-    // ============================================================
-    // 1. COMPATIBILITY FIX (HANDLE PARAMETER CHANGE)
-    // ============================================================
     let location = locationArg;
 
-    // Cek apakah argumen ke-3 adalah object lokasi (bukan URL string)
     if (mediaUrl && typeof mediaUrl === "object") {
-      // FORMAT A: { latitude: -6.2, longitude: 106.8 } (Clean Object)
+      // { latitude: -6.2, longitude: 106.8 }
       if (mediaUrl.latitude) {
         location = mediaUrl;
         mediaUrl = null;
       }
-      // FORMAT B: { lat: -6.2, lng: 106.8 } (Format WAHA/N8N umum)
+      // { lat: -6.2, lng: 106.8 } (Format WAHA/N8N umum)
       else if (mediaUrl.lat || (mediaUrl._data && mediaUrl._data.lat)) {
         location = {
           latitude: mediaUrl.lat || mediaUrl._data.lat,
@@ -193,9 +181,7 @@ export const handleCourierMessage = async (
       )}...`
     );
 
-    // ============================================================
-    // 2. DEFENSIVE CODING
-    // ============================================================
+    // DEFENSIVE CODING
     if (upperText === "#TEST KURIR") {
       return { reply: "🛠️ *MODE TESTING AKTIF*\nAnda sekarang dalam simulasi sebagai Kurir." };
     }
@@ -203,9 +189,7 @@ export const handleCourierMessage = async (
       return { reply: "🛠️ Silakan ketik perintah user." };
     }
 
-    // ============================================================
-    // A. LOGIN FLOW
-    // ============================================================
+    // LOGIN FLOW
     if (upperText.startsWith("#LOGIN")) {
       const inputPhone = upperText.split(" ")[1];
       if (!inputPhone) return { reply: "⚠️ *Format Salah*\nContoh: `#LOGIN 08123456789`" };
@@ -231,9 +215,7 @@ export const handleCourierMessage = async (
       };
     }
 
-    // ============================================================
-    // B. LOCATION UPDATE HANDLER (PRIORITAS UTAMA)
-    // ============================================================
+    // LOCATION UPDATE HANDLER
     if (location && location.latitude && !isNaN(parseFloat(location.latitude))) {
       // Panggil helper update DB & Socket
       await handleCourierLocation(courier, location.latitude, location.longitude, io);
@@ -250,9 +232,7 @@ export const handleCourierMessage = async (
       return { reply: "👋 Silakan Login: ketik\n*#LOGIN <NOMOR_HP_ANDA>*" };
     }
 
-    // ============================================================
     // C. ACTIVE ORDER FLOW (ON_PROCESS / SCAN STRUK)
-    // ============================================================
     const activeOrder = await Order.findOne({
       where: {
         courier_id: courier.id,
@@ -262,7 +242,7 @@ export const handleCourierMessage = async (
     });
 
     if (activeOrder) {
-      // 1. FASE BELANJA (ON_PROCESS)
+      // FASE BELANJA (ON_PROCESS)
       if (activeOrder.status === "ON_PROCESS") {
         if (mediaUrl || rawBase64) {
           await messageService.sendMessage(
@@ -276,7 +256,7 @@ export const handleCourierMessage = async (
               const imageInput = mediaUrl || rawBase64;
               let storedFileName;
 
-              // [STEP 1] UPLOAD KE MINIO (Wajib untuk arsip)
+              // UPLOAD KE MINIO
               if (typeof imageInput === "string" && imageInput.startsWith("http")) {
                 storedFileName = await storageService.uploadFileFromUrl(imageInput, fileName);
               } else {
@@ -286,14 +266,13 @@ export const handleCourierMessage = async (
               if (!storedFileName) throw new Error("Gagal simpan ke MinIO");
               console.log(`✅ Upload MinIO Sukses: ${storedFileName}`);
 
-              // [STEP 2] BYPASS URL ISSUE -> DOWNLOAD BASE64 DARI MINIO
-              // Kita ambil balik datanya agar AI tidak perlu akses URL localhost
+              // BYPASS URL ISSUE -> DOWNLOAD BASE64 DARI MINIO
               const rawBase64 = await storageService.downloadFileAsBase64(storedFileName);
 
               if (!rawBase64) throw new Error("Gagal download Base64 dari MinIO (Data Kosong)");
 
-              // [STEP 3] FORMATTING & SEND TO AI
-              // PENTING: Tambahkan prefix agar dikenali sebagai valid Image Data URI
+              // FORMATTING & SEND TO AI
+              // Tambahkan prefix agar dikenali sebagai valid Image Data URI
               const formattedBase64 = `data:image/jpeg;base64,${rawBase64}`;
 
               console.log(`🤖 AI Processing: Mengirim Base64 (Length: ${rawBase64.length})`);
@@ -353,7 +332,7 @@ export const handleCourierMessage = async (
         };
       }
 
-      // 2. FASE VALIDASI
+      // FASE VALIDASI
       else if (activeOrder.status === "BILL_VALIDATION") {
         const cleanNum = upperText.replace(/[^0-9]/g, "");
         const validYes = ["Y", "YA", "YES", "OK", "OKE", "SIAP", "BENAR"];
@@ -362,7 +341,7 @@ export const handleCourierMessage = async (
           const n8nImageAction = await executeBillFinalization(courier, activeOrder.order_id);
 
           if (n8nImageAction && n8nImageAction.action === "trigger_n8n_image") {
-            return n8nImageAction; // Kirim ke webhookController
+            return n8nImageAction;
           }
 
           return { reply: "⚠️ Gagal memproses data. Coba lagi." };
@@ -381,7 +360,7 @@ export const handleCourierMessage = async (
         };
       }
 
-      // 3. FASE ANTAR
+      // FASE ANTAR
       else if (activeOrder.status === "BILL_SENT") {
         if (upperText === "#SELESAI") {
           await orderService.completeOrder(activeOrder.order_id, courier.id);
@@ -401,11 +380,8 @@ export const handleCourierMessage = async (
       }
     }
 
-    // ============================================================
-    // D. GLOBAL COMMANDS (#SIAP, #OFF, #AMBIL, #INFO)
-    // ============================================================
+    // GLOBAL COMMANDS (#SIAP, #OFF, #AMBIL, #INFO)
     if (upperText === "#SIAP") {
-      // --- [VALIDASI LOKASI WAJIB] ---
       // Kurir tidak bisa #SIAP jika database belum punya lokasi
       if (!courier.current_latitude || !courier.current_longitude) {
         return {
@@ -430,7 +406,6 @@ export const handleCourierMessage = async (
       await redisClient.sRem("online_couriers", String(courier.id));
       return { reply: `⛔ *STATUS OFFLINE*\nHati-hati di jalan. 👋` };
     } else if (upperText.startsWith("#AMBIL")) {
-      // --- [VALIDASI LOKASI WAJIB] ---
       // Double check: Jangan sampai ambil order kalau lokasi hilang
       if (!courier.current_latitude || !courier.current_longitude) {
         return {

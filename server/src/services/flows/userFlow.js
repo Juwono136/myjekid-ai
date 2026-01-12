@@ -8,12 +8,10 @@ import {
 import { orderService } from "../orderService.js";
 import { redisClient } from "../../config/redisClient.js";
 import { dispatchService } from "../dispatchService.js";
-import { createSystemNotification } from "../../controllers/notificationController.js";
 
 // Helper sapaan
 const sapa = (name) => (name === "Customer" || !name ? "Kak" : `Kak ${name}`);
 
-// Tambahkan parameter 'io' di akhir fungsi
 export const handleUserMessage = async (
   phone,
   name,
@@ -22,7 +20,7 @@ export const handleUserMessage = async (
   locationData = null,
   io = null
 ) => {
-  // 1. SETUP USER & REGISTRASI
+  // SETUP USER & REGISTRASI
   let user = await User.findOne({
     where: sequelize.or({ phone: rawSenderId }, { device_id: rawSenderId }),
   });
@@ -61,14 +59,14 @@ export const handleUserMessage = async (
     }
   }
 
-  // 2. SETUP SESSION & REDIS MEMORY
+  // SETUP SESSION & REDIS MEMORY
   const realPhone = user.phone;
   const [session] = await ChatSession.findOrCreate({
     where: { phone: realPhone },
     defaults: { mode: "BOT" },
   });
 
-  // B. Blocking Jika Mode Human Aktif (Bot Diam)
+  // Blocking Jika Mode Human Aktif (Bot Diam)
   if (session.mode === "HUMAN") {
     // Return null agar bot tidak membalas apa-apa.
     // Pesan user tetap akan muncul di Dashboard Admin via Socket (di webhookController).
@@ -87,9 +85,7 @@ export const handleUserMessage = async (
     };
   }
 
-  // ============================================================
   // HANDLER KHUSUS LOKASI (UPDATE KOORDINAT)
-  // ============================================================
   if (locationData && locationData.latitude) {
     console.log(
       `📍 User ${name} Shared Location: ${locationData.latitude}, ${locationData.longitude}`
@@ -101,7 +97,7 @@ export const handleUserMessage = async (
       longitude: locationData.longitude,
     });
 
-    // Update Draft Redis (Sesi ini)
+    // Update Draft Redis
     sessionDraft.has_coordinate = true;
     sessionDraft.coordinate = {
       lat: locationData.latitude,
@@ -130,7 +126,7 @@ export const handleUserMessage = async (
   }
 
   try {
-    // 3. CONTEXT GATHERING
+    // CONTEXT GATHERING
     const draftOrder = await Order.findOne({
       where: { user_phone: phone, status: "DRAFT" },
       order: [["created_at", "DESC"]],
@@ -175,7 +171,7 @@ export const handleUserMessage = async (
         user.address_text || (lastSuccessOrder ? lastSuccessOrder.delivery_address : null),
     };
 
-    // 4. AI PROCESSING
+    // AI PROCESSING
     const aiResult = await aiService.parseOrder(text, contextData);
     let finalReply = aiResult.reply || aiResult.ai_reply || "";
 
@@ -186,9 +182,7 @@ export const handleUserMessage = async (
 
     let updatedDraftData = { ...combinedDraft, ...aiResult.data };
 
-    // --- INTENT LOGIC ---
-
-    // A. POLITE GUARD (Cek Status Pesanan Aktif jika user cuma bilang makasih/oke)
+    // POLITE GUARD (Cek Status Pesanan Aktif jika user cuma bilang makasih/oke)
     const lowerText = text.toLowerCase();
     const isPolite = ["makasih", "thanks", "oke", "siap", "baik"].some((w) =>
       lowerText.includes(w)
@@ -202,7 +196,7 @@ export const handleUserMessage = async (
         : "Sama-sama Kak! Kabari saja kalau mau pesan lagi ya.";
     }
 
-    // B. CONFIRM FINAL
+    // CONFIRM FINAL
     else if (aiResult.intent === "CONFIRM_FINAL") {
       if (draftOrder) {
         const validItems = draftOrder.items_summary && draftOrder.items_summary.length > 0;
@@ -250,7 +244,7 @@ export const handleUserMessage = async (
       }
     }
 
-    // C. CHECK STATUS
+    // CHECK STATUS
     else if (aiResult.intent === "CHECK_STATUS") {
       if (activeOrder) {
         finalReply = `Halo Kak ${sapa(user.name)}, pesanan Kakak saat ini *${getStatusMessage(
@@ -263,7 +257,7 @@ export const handleUserMessage = async (
       }
     }
 
-    // D. CANCEL
+    // CANCEL
     else if (aiResult.intent === "CANCEL") {
       if (draftOrder) {
         await draftOrder.update({ status: "CANCELLED" });
@@ -274,7 +268,7 @@ export const handleUserMessage = async (
       }
     }
 
-    // E. PROCESS ORDER (DRAFTING)
+    // PROCESS ORDER (DRAFTING)
     else if (["ORDER_INCOMPLETE", "ORDER_COMPLETE"].includes(aiResult.intent)) {
       if (draftOrder) {
         await draftOrder.update({

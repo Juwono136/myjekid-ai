@@ -14,6 +14,7 @@ import {
 import { useDispatch, useSelector } from "react-redux";
 import { logout } from "../features/authSlice";
 import ConfirmationModal from "./ConfirmationModal";
+import logoImg from "../assets/logo.png";
 
 const Sidebar = ({ closeDrawer }) => {
   const dispatch = useDispatch();
@@ -52,15 +53,15 @@ const Sidebar = ({ closeDrawer }) => {
       <div className="bg-white text-base-content h-full min-h-screen w-72 border-r border-gray-100 flex flex-col shadow-xl lg:shadow-none">
         {/* HEADER BRAND */}
         <div className="flex items-center gap-3 px-6 py-6 border-b border-gray-50">
-          <div className="w-10 h-10 bg-linear-to-r from-[#c73d06] to-[#f1b206] text-white rounded-xl flex items-center justify-center shadow-md">
-            <span className="font-black text-xl">M</span>
+          <div className="w-12 h-12 bg-linear-to-r from-[#f9ece6] to-[#fff2cd] rounded-xl flex items-center justify-center shadow-md">
+            <img src={logoImg} alt="logo-image" className="font-black text-xl p-2"></img>
           </div>
           <div>
             <h1 className="text-lg font-bold text-gray-800 tracking-tight leading-none">
               MyJek Admin
             </h1>
             <p className="text-[10px] text-gray-400 font-medium uppercase tracking-wider mt-1">
-              Smart Dashboard
+              Dashboard Management
             </p>
           </div>
         </div>
@@ -104,7 +105,7 @@ const Sidebar = ({ closeDrawer }) => {
         <div className="p-4 border-t border-gray-50 bg-gray-50/50">
           <button
             onClick={() => setLogoutModalOpen(true)}
-            className="flex w-full items-center gap-3 px-4 py-3 text-red-500 hover:bg-red-50 hover:text-red-600 rounded-xl transition-all font-medium text-sm group"
+            className="flex w-full items-center gap-3 px-4 py-3 text-red-500 hover:bg-red-50 hover:text-red-600 rounded-xl transition-all font-medium text-sm group cursor-pointer"
           >
             <FiLogOut size={20} className="group-hover:-translate-x-1 transition-transform" />
             Keluar Aplikasi
@@ -124,7 +125,7 @@ const Sidebar = ({ closeDrawer }) => {
         onClose={() => setLogoutModalOpen(false)}
         onConfirm={handleLogoutConfirm}
         title="Konfirmasi Logout"
-        message="Apakah Anda yakin ingin keluar dari sesi ini?"
+        message="Apakah Anda yakin ingin keluar dari halaman ini?"
         type="danger"
         confirmText="Ya, Keluar"
       />

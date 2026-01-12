@@ -3,7 +3,7 @@ import { Order, User, Courier, sequelize } from "../models/index.js";
 import logger from "../utils/logger.js";
 import ExcelJS from "exceljs";
 
-// --- HELPER: Date Filter ---
+// Date Filter
 const getDateFilter = (startDate, endDate) => {
   if (!startDate || !endDate) return {};
 
@@ -20,10 +20,7 @@ const getDateFilter = (startDate, endDate) => {
   };
 };
 
-/**
- * 1. GET SUMMARY
- * Menghitung Total Omzet, Total Transaksi, dll.
- */
+// Get report summary
 export const getReportSummary = async (req, res, next) => {
   try {
     const { startDate, endDate } = req.query;
@@ -35,17 +32,17 @@ export const getReportSummary = async (req, res, next) => {
       ...dateFilter,
     };
 
-    // A. Total Revenue (Omzet)
+    // Total Revenue
     const totalRevenue = await Order.sum("total_amount", {
       where: completedFilter,
     });
 
-    // B. Total Transactions (Jumlah Order Sukses)
+    // Total Transactions (Jumlah Order Sukses)
     const totalTransactions = await Order.count({
       where: completedFilter,
     });
 
-    // C. Cancelled Orders
+    // Cancelled Orders
     const totalCancelled = await Order.count({
       where: {
         status: "CANCELLED",
@@ -53,14 +50,14 @@ export const getReportSummary = async (req, res, next) => {
       },
     });
 
-    // D. Average Order Value
+    // Average Order Value
     const avgOrderValue =
       totalTransactions > 0 ? Math.round((totalRevenue || 0) / totalTransactions) : 0;
 
     res.status(200).json({
       status: "success",
       data: {
-        totalRevenue: parseInt(totalRevenue) || 0, // Sequelize return string utk Decimal
+        totalRevenue: parseInt(totalRevenue) || 0,
         totalTransactions,
         totalCancelled,
         avgOrderValue,
@@ -71,10 +68,7 @@ export const getReportSummary = async (req, res, next) => {
   }
 };
 
-/**
- * 2. GET CHART DATA
- * Grouping berdasarkan hari (created_at)
- */
+// Get revenue chart
 export const getRevenueChart = async (req, res, next) => {
   try {
     const { startDate, endDate } = req.query;
@@ -85,7 +79,7 @@ export const getRevenueChart = async (req, res, next) => {
       attributes: [
         [sequelize.fn("date_trunc", "day", sequelize.col("created_at")), "date"],
         [sequelize.fn("sum", sequelize.col("total_amount")), "revenue"],
-        [sequelize.fn("count", sequelize.col("order_id")), "count"], // Ganti id -> order_id
+        [sequelize.fn("count", sequelize.col("order_id")), "count"],
       ],
       where: {
         ...dateFilter,
@@ -110,10 +104,7 @@ export const getRevenueChart = async (req, res, next) => {
   }
 };
 
-/**
- * 3. GET TRANSACTION LIST
- * Menampilkan detail order dengan User dan Courier
- */
+// Get transaction reports
 export const getTransactionReports = async (req, res, next) => {
   try {
     const { page = 1, limit = 10, search = "", status, startDate, endDate } = req.query;
@@ -128,14 +119,11 @@ export const getTransactionReports = async (req, res, next) => {
       whereClause.status = status;
     }
 
-    // Logic Search:
-    // 1. Cari berdasarkan Order ID (String)
-    // 2. Cari berdasarkan Nama User (via Relasi)
     if (search) {
       whereClause[Op.or] = [
         // Cari di kolom order_id (Case Insensitive)
         { order_id: { [Op.iLike]: `%${search}%` } },
-        // Cari di kolom nama user (membutuhkan asosiasi yang benar)
+        // Cari di kolom nama user
         { "$user.name$": { [Op.iLike]: `%${search}%` } },
       ];
     }
@@ -145,19 +133,17 @@ export const getTransactionReports = async (req, res, next) => {
       include: [
         {
           model: User,
-          // as: 'user', // Aktifkan jika di models/index.js ada alias 'as: user'
           attributes: ["name", "phone"],
         },
         {
           model: Courier,
-          // as: 'courier', // Aktifkan jika di models/index.js ada alias 'as: courier'
           attributes: ["name", "phone", "shift_code"],
         },
       ],
       limit: parseInt(limit),
       offset: parseInt(offset),
       order: [["created_at", "DESC"]],
-      distinct: true, // Penting agar count akurat saat ada include
+      distinct: true,
     });
 
     res.status(200).json({
@@ -175,15 +161,11 @@ export const getTransactionReports = async (req, res, next) => {
   }
 };
 
-/**
- * 4. EXPORT TO EXCEL
- * Endpoint: /api/reports/export/excel?startDate=...&endDate=...&status=...
- */
+// Export to excel
 export const exportTransactionReport = async (req, res, next) => {
   try {
     const { search = "", status, startDate, endDate } = req.query;
 
-    // 1. Setup Filter (Sama persis dengan getTransactionReports, TAPI TANPA LIMIT/PAGINATION)
     const whereClause = {
       ...getDateFilter(startDate, endDate),
     };
@@ -199,7 +181,6 @@ export const exportTransactionReport = async (req, res, next) => {
       ];
     }
 
-    // 2. Ambil SEMUA data (tanpa limit/offset)
     const orders = await Order.findAll({
       where: whereClause,
       include: [
@@ -209,11 +190,11 @@ export const exportTransactionReport = async (req, res, next) => {
       order: [["created_at", "DESC"]],
     });
 
-    // 3. Setup Workbook & Worksheet Excel
+    // Setup Workbook & Worksheet Excel
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Laporan Transaksi");
 
-    // 4. Definisi Header Kolom
+    // Definisi Header Kolom
     worksheet.columns = [
       { header: "No", key: "no", width: 5 },
       { header: "Order ID", key: "order_id", width: 20 },
@@ -226,15 +207,15 @@ export const exportTransactionReport = async (req, res, next) => {
       { header: "Total (Rp)", key: "amount", width: 15 },
     ];
 
-    // 5. Styling Header (Bold & Background Abu)
+    // Styling Header (Bold & Background Abu)
     worksheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
     worksheet.getRow(1).fill = {
       type: "pattern",
       pattern: "solid",
-      fgColor: { argb: "FF4F81BD" }, // Warna Biru Profesional
+      fgColor: { argb: "FF4F81BD" },
     };
 
-    // 6. Isi Data (Looping)
+    // Isi Data (Looping)
     let totalRevenue = 0;
 
     orders.forEach((order, index) => {
@@ -251,18 +232,17 @@ export const exportTransactionReport = async (req, res, next) => {
         date: dateObj.toLocaleDateString("id-ID"),
         time: dateObj.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
         user_name: order.user?.name || "Deleted User",
-        user_phone: order.user_phone, // Foreign key langsung
+        user_phone: order.user_phone,
         courier_name: order.courier?.name || "-",
         status: order.status,
         amount: Number(order.total_amount),
       });
     });
 
-    // 7. Styling Kolom Amount (Currency Format)
-    // Kolom ke-9 adalah 'amount'
+    // Styling Kolom Amount (Currency Format)
     worksheet.getColumn(9).numFmt = '"Rp" #,##0';
 
-    // 8. Tambahkan Baris Grand Total di Paling Bawah
+    // Tambahkan Baris Grand Total di Paling Bawah
     const lastRowIndex = orders.length + 2; // +1 Header, +1 Baris Baru
     const totalRow = worksheet.getRow(lastRowIndex);
 
@@ -280,7 +260,7 @@ export const exportTransactionReport = async (req, res, next) => {
 
     // Style Baris Total
     totalRow.font = { bold: true };
-    totalRow.getCell(8).alignment = { horizontal: "right" }; // Rata kanan label "GRAND TOTAL"
+    totalRow.getCell(8).alignment = { horizontal: "right" };
     totalRow.getCell(9).numFmt = '"Rp" #,##0';
     totalRow.getCell(9).fill = {
       type: "pattern",
@@ -288,7 +268,7 @@ export const exportTransactionReport = async (req, res, next) => {
       fgColor: { argb: "FFFFFF00" }, // Warna Kuning Stabilo
     };
 
-    // 9. Kirim Response sebagai File Stream
+    // Kirim Response sebagai File Stream
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

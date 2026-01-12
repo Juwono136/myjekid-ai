@@ -9,8 +9,9 @@ import {
   validatePassword,
 } from "../utils/validators.js";
 
-const JWT_SECRET = process.env.JWT_SECRET || "rahasia_negara_myjek_sumbawa_2025";
+const JWT_SECRET = process.env.JWT_SECRET;
 
+// Login admin
 export const loginAdmin = async (req, res, next) => {
   try {
     const { email, password } = req.body;
@@ -68,11 +69,11 @@ export const loginAdmin = async (req, res, next) => {
       },
     });
   } catch (error) {
-    // Kirim ke Global Error Handler
     next(error);
   }
 };
 
+// Get Me (admin data)
 export const getMe = async (req, res, next) => {
   try {
     const admin = await Admin.findByPk(req.user.id, {
@@ -92,18 +93,14 @@ export const getMe = async (req, res, next) => {
   }
 };
 
-/**
- * [BARU] UPDATE PROFILE (Self Service)
- * Hanya mengizinkan update Nama dan No. HP.
- * Email tidak boleh diubah di sini.
- */
+// update profile
 export const updateProfile = async (req, res, next) => {
   try {
-    // 1. Ambil ID dari Token (bukan dari body, agar aman/tidak bisa edit org lain)
+    // Ambil ID dari Token
     const adminId = req.user.id;
     const { full_name, phone } = req.body;
 
-    // 2. Validasi Input
+    // Validasi Input
     if (!full_name || !phone) {
       return next(new AppError("Nama Lengkap dan Nomor HP wajib diisi.", 400));
     }
@@ -112,14 +109,13 @@ export const updateProfile = async (req, res, next) => {
       return next(new AppError("Nomor HP tidak valid.", 400));
     }
 
-    // 3. Cari Admin
+    // Cari Admin
     const admin = await Admin.findByPk(adminId);
     if (!admin) {
       return next(new AppError("User tidak ditemukan.", 404));
     }
 
-    // 4. Update Data (Hanya field yang diizinkan)
-    // Kita abaikan req.body.email atau req.body.role jika user mencoba mengirimnya
+    // Update Data
     await admin.update({
       full_name: full_name,
       phone: phone,
@@ -127,7 +123,6 @@ export const updateProfile = async (req, res, next) => {
 
     logger.info(`Admin ID ${adminId} updated their profile.`);
 
-    // 5. Kirim Respon
     res.status(200).json({
       status: "success",
       message: "Profil berhasil diperbarui.",
@@ -144,26 +139,23 @@ export const updateProfile = async (req, res, next) => {
   }
 };
 
-/**
- * [BARU] UPDATE PASSWORD (Self Service)
- * Wajib memasukkan password lama demi keamanan.
- */
+// update password
 export const updatePassword = async (req, res, next) => {
   try {
     const adminId = req.user.id;
     const { currentPassword, newPassword, confirmPassword } = req.body;
 
-    // 1. Validasi Input Dasar
+    // Validasi Input Dasar
     if (!currentPassword || !newPassword || !confirmPassword) {
-      return next(new AppError("Mohon lengkapi semua kolom password.", 400));
+      return next(new AppError("Mohon lengkapi semua input password.", 400));
     }
 
-    // 2. Cek Kesamaan Password Baru
+    // Cek Kesamaan Password Baru
     if (newPassword !== confirmPassword) {
       return next(new AppError("Konfirmasi password baru tidak cocok.", 400));
     }
 
-    // 3. (Opsional) Validasi Kekuatan Password
+    // Validasi Password
     if (!validatePassword(newPassword)) {
       return next(
         new AppError(
@@ -173,19 +165,19 @@ export const updatePassword = async (req, res, next) => {
       );
     }
 
-    // 4. Cari Admin (Scope password_hash harus ada)
+    // Cari Admin
     const admin = await Admin.findByPk(adminId);
     if (!admin) {
       return next(new AppError("User tidak ditemukan.", 404));
     }
 
-    // 5. SECURITY CHECK: Verifikasi Password Lama
+    // Verifikasi Password Lama
     const isMatch = await bcrypt.compare(currentPassword, admin.password_hash);
     if (!isMatch) {
       return next(new AppError("Password lama Anda salah.", 401));
     }
 
-    // 6. Cek apakah password baru sama dengan password lama (Opsional, UX)
+    // Cek apakah password baru sama dengan password lama
     if (currentPassword === newPassword) {
       return next(new AppError("Password baru tidak boleh sama dengan password lama.", 400));
     }
@@ -198,7 +190,6 @@ export const updatePassword = async (req, res, next) => {
 
     logger.info(`Admin ID ${adminId} changed their password.`);
 
-    // 8. Kirim Respon (Tanpa Token baru, memaksa login ulang di frontend)
     res.status(200).json({
       status: "success",
       message: "Password berhasil diubah. Silakan login kembali dengan password baru.",

@@ -3,7 +3,7 @@ import { Op } from "sequelize";
 import AppError from "../utils/AppError.js";
 import logger from "../utils/logger.js";
 
-// --- 1. GET ALL ORDERS (Monitor List) ---
+// Get all orders
 export const getAllOrders = async (req, res, next) => {
   try {
     const {
@@ -18,12 +18,12 @@ export const getAllOrders = async (req, res, next) => {
     const offset = (page - 1) * limit;
     const whereClause = {};
 
-    // 1. Filter Status
+    // Filter Status
     if (status && status !== "ALL") {
       whereClause.status = status;
     }
 
-    // 2. Search Logic
+    // Search Logic
     if (search) {
       whereClause[Op.or] = [
         { order_id: { [Op.iLike]: `%${search}%` } },
@@ -31,8 +31,7 @@ export const getAllOrders = async (req, res, next) => {
       ];
     }
 
-    // 3. Sorting Logic (Diperketat)
-    // Map parameter frontend ke nama kolom database/model yang valid
+    // Sorting Logic
     const sortMap = {
       created_at: "created_at",
       total_amount: "total_amount",
@@ -46,7 +45,7 @@ export const getAllOrders = async (req, res, next) => {
       where: whereClause,
       limit: parseInt(limit),
       offset: parseInt(offset),
-      order: [[dbSortField, dbSortDirection]], // Gunakan hasil mapping
+      order: [[dbSortField, dbSortDirection]],
       distinct: true,
       include: [
         {
@@ -72,7 +71,7 @@ export const getAllOrders = async (req, res, next) => {
   }
 };
 
-// --- 2. GET ORDER DETAIL (PERBAIKAN UTAMA DISINI) ---
+// Get order detail
 export const getOrderById = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -85,10 +84,9 @@ export const getOrderById = async (req, res, next) => {
           as: "user",
           attributes: ["name", "phone"],
         },
-        // TAMBAHAN BARU: Include Courier
         {
           model: Courier,
-          as: "courier", // Pastikan sesuai dengan alias di model/index.js (default biasanya lowercase nama model)
+          as: "courier",
           attributes: ["name", "phone", "status"],
         },
       ],
@@ -97,8 +95,6 @@ export const getOrderById = async (req, res, next) => {
     if (!order) {
       return next(new AppError("Order tidak ditemukan", 404));
     }
-
-    // items_summary sudah otomatis diambil sebagai bagian dari objek 'order'
 
     res.status(200).json({
       status: "success",

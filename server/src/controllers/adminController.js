@@ -1,15 +1,15 @@
-import { Admin, Order, Courier, User, ChatSession, sequelize } from "../models/index.js";
 import { Op, QueryTypes } from "sequelize";
 import bcrypt from "bcryptjs";
 import AppError from "../utils/AppError.js";
 import logger from "../utils/logger.js";
+import { Admin, Order, Courier, ChatSession, sequelize } from "../models/index.js";
 import {
   validateAndNormalizePhoneNumber,
   validateEmail,
   validatePassword,
 } from "../utils/validators.js";
 
-// API untuk Admin mematikan/menyalakan Bot user tertentu (Switch mode)
+// Mematikan/menyalakan Bot user tertentu (Switch mode)
 export const setSessionMode = async (req, res) => {
   const { phone, mode, duration_minutes } = req.body;
 
@@ -37,7 +37,7 @@ export const setSessionMode = async (req, res) => {
     await session.update(updateData);
 
     return res.json({
-      message: `Sukses ubah mode ke ${mode} untuk user ${phone}`,
+      message: `Berhasil ubah mode ke ${mode} untuk user ${phone}`,
       data: updateData,
     });
   } catch (error) {
@@ -45,7 +45,7 @@ export const setSessionMode = async (req, res) => {
   }
 };
 
-// --- 1. GET ALL ADMINS (Search, Filter, Sort, Pagination) ---
+// Get all admins
 export const getAllAdmins = async (req, res, next) => {
   try {
     const {
@@ -59,7 +59,7 @@ export const getAllAdmins = async (req, res, next) => {
 
     const offset = (page - 1) * limit;
 
-    // A. Filter Logic
+    // Filter Logic
     const whereClause = {};
     if (search) {
       whereClause[Op.or] = [
@@ -73,7 +73,7 @@ export const getAllAdmins = async (req, res, next) => {
       whereClause.role = role;
     }
 
-    // B. Sorting Logic (Whitelist Field agar aman dari SQL Injection)
+    // Sorting Logic (Whitelist Field agar aman dari SQL Injection)
     const allowedSortFields = ["created_at", "full_name", "email", "last_login"];
 
     // Validasi field sort (fallback ke created_at jika input aneh)
@@ -89,7 +89,7 @@ export const getAllAdmins = async (req, res, next) => {
       limit: parseInt(limit),
       offset: parseInt(offset),
       order: [[validSortBy, validOrder]], // Format Sequelize: [['field', 'DESC']]
-      attributes: { exclude: ["password_hash"] }, // Security: Jangan kirim hash password
+      attributes: { exclude: ["password_hash"] },
     });
 
     res.status(200).json({
@@ -106,40 +106,40 @@ export const getAllAdmins = async (req, res, next) => {
   }
 };
 
-// --- 2. CREATE ADMIN (Validation & Hash) ---
+// Create admin
 export const createAdmin = async (req, res, next) => {
   try {
     const { full_name, email, password, phone, role } = req.body;
 
-    // 1. Validasi Input Wajib
+    // Validasi Input Wajib
     if (!full_name || !email || !password || !phone) {
       return next(new AppError("Nama, Email, No. HP dan Password wajib diisi.", 400));
     }
 
-    // 2. Validasi Format (Regex)
+    // Validasi Format
     if (!validateEmail(email)) {
       return next(new AppError("Format Email tidak valid.", 400));
     }
     if (!validatePassword(password)) {
       return next(
-        new AppError("Password lemah! Gunakan Huruf Besar, Kecil, Angka, min 8 karakter.", 400)
+        new AppError("Gunakan Kombinasi Huruf Besar, Kecil, Angka, min 8 karakter.", 400)
       );
     }
     if (!validateAndNormalizePhoneNumber(phone)) {
       return next(new AppError("Nomor HP tidak valid.", 400));
     }
 
-    // 3. Cek Duplikasi Email
+    // Cek Duplikasi Email
     const existing = await Admin.findOne({ where: { email } });
     if (existing) {
       return next(new AppError("Email sudah terdaftar.", 400));
     }
 
-    // 4. Hash Password
+    // Hash Password
     const salt = await bcrypt.genSalt(10);
     const password_hash = await bcrypt.hash(password, salt);
 
-    // 5. Simpan ke DB
+    // Simpan ke DB
     const newAdmin = await Admin.create({
       full_name,
       email,
@@ -166,20 +166,19 @@ export const createAdmin = async (req, res, next) => {
   }
 };
 
-// --- 3. UPDATE ADMIN (Restricted Fields) ---
+// Update admin
 export const updateAdmin = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { role, is_active } = req.body; // Hanya ambil field aman
+    const { role, is_active } = req.body;
 
     const admin = await Admin.findByPk(id);
     if (!admin) {
       return next(new AppError("User tidak ditemukan", 404));
     }
 
-    // Proteksi: Tidak bisa menonaktifkan diri sendiri
     if (req.user && id === req.user.id && is_active === false) {
-      return next(new AppError("Anda tidak dapat menonaktifkan akun sendiri.", 400));
+      return next(new AppError("Maaf, Kamu tidak dapat menonaktifkan akun sendiri.", 400));
     }
 
     // Update Field jika dikirim
@@ -192,21 +191,20 @@ export const updateAdmin = async (req, res, next) => {
 
     res.status(200).json({
       status: "success",
-      message: "Data akses user berhasil diperbarui",
+      message: "User berhasil diperbarui",
     });
   } catch (error) {
     next(error);
   }
 };
 
-// --- 4. DELETE ADMIN ---
+// Delete admin
 export const deleteAdmin = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    // Proteksi: Tidak bisa hapus diri sendiri
     if (req.user && id === req.user.id) {
-      return next(new AppError("Anda tidak dapat menghapus akun sendiri.", 400));
+      return next(new AppError("Kamu tidak dapat menghapus akun sendiri.", 400));
     }
 
     const admin = await Admin.findByPk(id);
@@ -225,6 +223,7 @@ export const deleteAdmin = async (req, res, next) => {
   }
 };
 
+// Get dashboard status
 export const getDashboardStats = async (req, res, next) => {
   try {
     const now = new Date();
@@ -232,7 +231,7 @@ export const getDashboardStats = async (req, res, next) => {
     const startOfToday = new Date(now);
     startOfToday.setHours(0, 0, 0, 0);
 
-    // --- Metrics ---
+    // Metrics
     const revRaw = await Order.sum("total_amount", {
       where: { status: "COMPLETED", created_at: { [Op.gte]: startOfMonth } },
     });
@@ -246,7 +245,7 @@ export const getDashboardStats = async (req, res, next) => {
       where: { status: { [Op.notIn]: ["COMPLETED", "CANCELLED"] } },
     });
 
-    // --- Recent Orders ---
+    // Recent Orders
     const recentOrders = await Order.findAll({
       limit: 5,
       order: [["created_at", "DESC"]],
@@ -272,7 +271,7 @@ export const getDashboardStats = async (req, res, next) => {
   }
 };
 
-// 2. FUNGSI BARU: KHUSUS UNTUK CHART (INDEPENDEN)
+// Get chart data
 export const getChartData = async (req, res, next) => {
   try {
     const type = String(req.query.type || "").toLowerCase();
@@ -285,9 +284,6 @@ export const getChartData = async (req, res, next) => {
       });
     }
 
-    // =========================
-    // 1. TENTUKAN ANCHOR DATE
-    // =========================
     let anchorDate = new Date();
 
     if (type === "revenue") {
@@ -305,9 +301,6 @@ export const getChartData = async (req, res, next) => {
       if (lastOrder) anchorDate = new Date(lastOrder.created_at);
     }
 
-    // =========================
-    // 2. START DATE
-    // =========================
     let startDate = new Date(anchorDate);
 
     if (range === "30days") startDate.setDate(anchorDate.getDate() - 29);
@@ -318,9 +311,6 @@ export const getChartData = async (req, res, next) => {
 
     let resultData = [];
 
-    // =========================
-    // 3. REVENUE
-    // =========================
     if (type === "revenue") {
       const rawData = await sequelize.query(
         `
@@ -353,12 +343,7 @@ export const getChartData = async (req, res, next) => {
           income: match ? Number(match.income) : 0,
         });
       }
-    }
-
-    // =========================
-    // 4. DISTRIBUTION (AMAN)
-    // =========================
-    else {
+    } else {
       const rawStatus = await sequelize.query(
         `
         SELECT status, COUNT(*) AS count
@@ -373,7 +358,6 @@ export const getChartData = async (req, res, next) => {
         }
       );
 
-      // Normalisasi di JS (AMAN)
       resultData = rawStatus.map((r) => ({
         name: String(r.status).toUpperCase(),
         value: Number(r.count),

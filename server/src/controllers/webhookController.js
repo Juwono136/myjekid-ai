@@ -7,10 +7,9 @@ import { sanitizePhoneNumber } from "../utils/formatter.js";
 import { createSystemNotification } from "./notificationController.js";
 import logger from "../utils/logger.js";
 
-// --- HELPERS ---
 const sanitizeId = (id) => (id ? id.split("@")[0] : "");
 
-// --- STANDARD N8N RESPONSE (TEXT) ---
+// STANDARD N8N RESPONSE (TEXT)
 const createN8nResponse = (to, body) => {
   return {
     action: "reply_text",
@@ -18,7 +17,7 @@ const createN8nResponse = (to, body) => {
   };
 };
 
-// --- N8N RESPONSE (LOCATION) ---
+// N8N RESPONSE (LOCATION)
 const createN8nLocationResponse = (to, lat, long, address, reply) => {
   return {
     action: "reply_location",
@@ -33,7 +32,7 @@ const createN8nLocationResponse = (to, lat, long, address, reply) => {
   };
 };
 
-// --- N8N RESPONSE (IMAGE) ---
+// N8N RESPONSE (IMAGE)
 const createN8nImageResponse = (to, url, caption) => {
   return {
     action: "reply_image",
@@ -49,12 +48,12 @@ export const handleIncomingMessage = async (req, res) => {
   try {
     const data = req.body;
 
-    // 1. VALIDASI PAYLOAD
+    // VALIDASI PAYLOAD
     const payload = data.payload || data;
     if (!payload || !payload.from) return res.status(200).json({ status: "ignored_empty" });
     if (payload.fromMe) return res.status(200).json({ status: "ignored_self" });
 
-    // --- FILTER TIPE PESAN (SAFETY GATE) ---
+    // FILTER TIPE PESAN (SAFETY GATE)
     const messageType = payload._data?.type || payload.type || "chat";
     const allowedTypes = ["chat", "location", "image"];
 
@@ -70,7 +69,7 @@ export const handleIncomingMessage = async (req, res) => {
         );
     }
 
-    // 2. PARSING DATA DASAR
+    // PARSING DATA DASAR
     const rawSenderId = payload.from;
     const senderIdClean = sanitizeId(rawSenderId);
     const senderName = payload.pushname || payload._data?.notifyName || "Customer";
@@ -105,15 +104,11 @@ export const handleIncomingMessage = async (req, res) => {
     const upperBody = messageBody.toUpperCase().trim();
     let n8nResponse = null;
 
-    // ============================================================
-    // LOGIC 1: CEK MODE TESTING (REDIS)
-    // ============================================================
+    //CEK MODE TESTING (REDIS)
     const testModeKey = `test_mode:${senderIdClean}`;
     const testMode = await redisClient.get(testModeKey); // "USER" atau "COURIER"
 
-    // ============================================================
-    // LOGIC 2: IDENTIFIKASI PERAN
-    // ============================================================
+    // IDENTIFIKASI PERAN
     let courier = await Courier.findOne({
       where: {
         [Op.or]: [{ phone: senderIdClean }, { device_id: rawSenderId }],
@@ -128,14 +123,10 @@ export const handleIncomingMessage = async (req, res) => {
       if (testMode === "COURIER") isActingAsCourier = true;
     }
 
-    // ============================================================
-    // LOGIC 3: ROUTING FLOW
-    // ============================================================
-
+    // ROUTING FLOW
     if (isActingAsCourier) {
-      // --- A. FLOW KURIR ---
-
-      // 1. Cek Mode Test
+      // FLOW KURIR
+      // Cek Mode Test
       if (upperBody === "#TEST USER") {
         await redisClient.set(testModeKey, "USER");
         return res.json(createN8nResponse(rawSenderId, "🛠️ MODE TESTING: AKTIF SEBAGAI USER."));
@@ -147,7 +138,7 @@ export const handleIncomingMessage = async (req, res) => {
         );
       }
 
-      // 2. Login Kurir
+      // Login Kurir
       if (upperBody.startsWith("#LOGIN")) {
         const inputPhone = upperBody.replace("#LOGIN", "").trim();
         const cleanPhone = sanitizePhoneNumber(inputPhone);
@@ -173,7 +164,7 @@ export const handleIncomingMessage = async (req, res) => {
         );
       }
 
-      // 3. Handle Pesan Kurir
+      // Handle Pesan Kurir
       const courierReply = await handleCourierMessage(
         courier,
         messageBody,
@@ -203,14 +194,14 @@ export const handleIncomingMessage = async (req, res) => {
         n8nResponse = createN8nResponse(rawSenderId, courierReply.reply);
       }
     } else {
-      // --- B. FLOW USER (DENGAN LOGIC SAFETY NET) ---
+      // FLOW USER
 
       if (upperBody === "#TEST KURIR") {
         await redisClient.set(testModeKey, "COURIER");
         return res.json(createN8nResponse(rawSenderId, "🛠️ MODE TESTING: KEMBALI SEBAGAI KURIR."));
       }
 
-      // 1. Identifikasi User & Registrasi
+      // Identifikasi User & Registrasi
       let existingUser = await User.findOne({
         where: { [Op.or]: [{ phone: senderIdClean }, { device_id: rawSenderId }] },
       });
@@ -230,9 +221,9 @@ export const handleIncomingMessage = async (req, res) => {
         }
       } else {
         if (existingUser) {
-          // --- LOGIC INTERVENTION & HANDOFF ---
+          // LOGIC INTERVENTION & HANDOFF
 
-          // 1. Ambil / Buat Sesi Chat
+          // Ambil / Buat Sesi Chat
           let session = await ChatSession.findOne({ where: { phone: existingUser.phone } });
           if (!session) {
             session = await ChatSession.create({
@@ -243,17 +234,14 @@ export const handleIncomingMessage = async (req, res) => {
             });
           }
 
-          // 2. Cek Kondisi "DIAM" (Human Mode atau Paused)
+          // Cek Kondisi "DIAM" (Human Mode atau Paused)
           const isHumanMode = session.mode === "HUMAN";
           const currentTime = new Date();
           const isPaused =
             session.is_paused_until && new Date(session.is_paused_until) > currentTime;
 
           if (isHumanMode || isPaused) {
-            // ============================================================
-            // KONDISI A: MODE HUMAN / PAUSED -> BOT DIAM & FORWARD KE ADMIN
-            // ============================================================
-
+            // MODE HUMAN / PAUSED -> BOT DIAM & FORWARD KE ADMIN
             // Simpan Log ke TrainingData
             await TrainingData.create({
               user_question: messageBody,
@@ -278,10 +266,7 @@ export const handleIncomingMessage = async (req, res) => {
             return res.status(200).json({ status: "forwarded_to_admin" });
           }
 
-          // ============================================================
-          // KONDISI B: MODE BOT (AI BEKERJA)
-          // ============================================================
-
+          // MODE BOT (AI BEKERJA)
           // Cek apakah waktu pause sudah habis? Jika ya, bersihkan status di DB
           if (session.is_paused_until && new Date(session.is_paused_until) <= currentTime) {
             await session.update({ is_paused_until: null, mode: "BOT" });
@@ -338,16 +323,16 @@ export const handleIncomingMessage = async (req, res) => {
     if (n8nResponse) return res.json(n8nResponse);
     return res.status(200).json({ status: "no_response_needed" });
   } catch (error) {
-    logger.error(`❌ Error Processing Webhook: ${error.message}`);
+    logger.error(`Error Processing Webhook: ${error.message}`);
 
-    // --- SAFETY NET: AUTOMATIC HANDOFF SAAT ERROR ---
+    // AUTOMATIC HANDOFF SAAT ERROR
     try {
-      // 1. Identifikasi Nomor HP User dari body request (karena variabel existingUser mungkin undefined jika error di awal)
+      // Identifikasi Nomor HP User dari body request (karena variabel existingUser mungkin undefined jika error di awal)
       const rawId = req.body?.payload?.from || req.body?.payload?.chatId || "";
       const phone = sanitizePhoneNumber(sanitizeId(rawId));
 
       if (phone) {
-        // 2. Update Mode ke HUMAN di Database
+        // Update Mode ke HUMAN di Database
         // Kita cari atau buat sesi darurat jika belum ada
         let session = await ChatSession.findOne({ where: { phone } });
 
@@ -358,15 +343,14 @@ export const handleIncomingMessage = async (req, res) => {
             is_paused_until: null, // Reset pause agar admin bisa langsung masuk
           });
 
-          // 3. Kirim Notifikasi & Email ke Admin
-          // (Menggunakan helper yang sama dengan Intervention Controller)
+          // Kirim Notifikasi & Email ke Admin
           await createSystemNotification(req.io, {
             title: "SYSTEM CRASH: Bot Gagal Memproses Pesan!",
             message: `Terjadi error kritis pada Bot: "${error.message}". Mode otomatis dialihkan ke HUMAN untuk user ${phone}. Segera lakukan tindakan atau chat user tersebut untuk dibantu!`,
-            type: "HUMAN_HANDOFF", // Tipe ini memicu Email
+            type: "HUMAN_HANDOFF",
             referenceId: phone,
             actionUrl: `/dashboard/chat`,
-            extraData: { userName: session.user_name || "User" }, // Ambil nama jika ada
+            extraData: { userName: session.user_name || "User" },
           });
 
           logger.info(`Emergency Handoff triggered for ${phone}`);
@@ -375,10 +359,6 @@ export const handleIncomingMessage = async (req, res) => {
     } catch (innerError) {
       console.error("Gagal menjalankan Safety Net:", innerError);
     }
-    // ------------------------------------------------
-
-    // Tetap return status 500 atau 200 agar WAHA tidak me-retry terus menerus (tergantung strategi Anda)
-    // Disarankan 200 agar tidak looping error di WAHA
     return res.status(200).json({ status: "error", message: "Error handled gracefully" });
   }
 };

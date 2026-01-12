@@ -7,7 +7,7 @@ import { createSystemNotification } from "./notificationController.js";
 
 dotenv.config();
 
-// --- KONFIGURASI WAHA ---
+// KONFIGURASI WAHA
 const WAHA_URL = process.env.WAHA_API_URL || "http://localhost:7575";
 const WAHA_KEY = process.env.WAHA_API_KEY || "";
 
@@ -21,9 +21,7 @@ const wahaClient = axios.create({
   },
 });
 
-/**
- * 1. KIRIM PESAN DARI ADMIN KE USER
- */
+// Kirim pesan dari admin ke user
 export const sendMessageToUser = async (req, res, next) => {
   try {
     const { phone, message } = req.body;
@@ -63,15 +61,12 @@ export const sendMessageToUser = async (req, res, next) => {
 
     res.status(200).json({ status: "success", message: "Pesan terkirim." });
   } catch (error) {
-    logger.error(`Gagal kirim pesan admin: ${error.message}`);
+    logger.error(`Failed to send admin message: ${error.message}`);
     next(error);
   }
 };
 
-/**
- * 2. TOGGLE MODE (BOT <-> HUMAN)
- * [FIXED] Sekarang mentrigger Notifikasi & Email
- */
+// Toogle mode (HUMAN <-> BOT)
 export const toggleSessionMode = async (req, res, next) => {
   try {
     const { phone, mode } = req.body;
@@ -80,7 +75,7 @@ export const toggleSessionMode = async (req, res, next) => {
       return res.status(400).json({ message: "Mode harus 'HUMAN' atau 'BOT'" });
     }
 
-    // Include User untuk mendapatkan Nama User (keperluan Email Template)
+    // Include User untuk mendapatkan Nama User
     let session = await ChatSession.findOne({
       where: { phone },
       include: [{ model: User, attributes: ["name"] }],
@@ -90,7 +85,6 @@ export const toggleSessionMode = async (req, res, next) => {
 
     let updateData = { mode };
 
-    // LOGIKA SAFETY NET
     if (mode === "HUMAN") {
       const pauseDuration = 30 * 60 * 1000; // 30 Menit
       updateData.is_paused_until = new Date(Date.now() + pauseDuration);
@@ -100,7 +94,6 @@ export const toggleSessionMode = async (req, res, next) => {
 
     await session.update(updateData);
 
-    // 1. Emit Socket Chat UI (Agar tombol toggle berubah)
     if (req.io) {
       req.io.emit("intervention-message", {
         phone: phone,
@@ -112,18 +105,18 @@ export const toggleSessionMode = async (req, res, next) => {
         is_paused_until: updateData.is_paused_until,
       });
 
-      // 2. [FIX] TRIGGER NOTIFIKASI SYSTEM & EMAIL (Hanya jika masuk mode HUMAN)
+      // TRIGGER NOTIFIKASI SYSTEM & EMAIL (Hanya jika masuk mode HUMAN)
       if (mode === "HUMAN") {
         const userName = session.user?.name || "User Tanpa Nama";
 
         await createSystemNotification(req.io, {
           title: "Mode Human Diaktifkan Manual",
           message: `Admin telah mengubah mode chat untuk user ${userName} (${phone}) menjadi HUMAN.`,
-          type: "HUMAN_HANDOFF", // Tipe ini akan memicu pengiriman Email di notificationController
+          type: "HUMAN_HANDOFF",
           referenceId: phone,
           actionUrl: `/dashboard/chat`,
           extraData: { userName: userName },
-        }).catch((err) => logger.error(`Gagal kirim notifikasi toggle: ${err.message}`));
+        }).catch((err) => logger.error(`Failed to send notification toggle: ${err.message}`));
       }
     }
 
@@ -133,15 +126,12 @@ export const toggleSessionMode = async (req, res, next) => {
   }
 };
 
-/**
- * 3. AMBIL DAFTAR USER AKTIF
- * (Versi yang sudah diperbaiki filternya agar data muncul)
- */
+// Ambil daftar user aktif
 export const getActiveSessions = async (req, res, next) => {
   try {
     const { search = "" } = req.query;
 
-    // Filter Longgar: Tampilkan semua sesi
+    // Tampilkan semua sesi
     const whereClause = {};
 
     const includeUser = {
@@ -185,9 +175,7 @@ export const getActiveSessions = async (req, res, next) => {
   }
 };
 
-/**
- * 4. AMBIL HISTORY CHAT
- */
+// Ambil history chat
 export const getChatHistory = async (req, res, next) => {
   try {
     const { phone } = req.params;

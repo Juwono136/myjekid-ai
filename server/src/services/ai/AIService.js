@@ -83,13 +83,13 @@ class AIService {
 
       let imageBase64 = "";
 
-      // --- LOGIC 1: Jika Input adalah URL (Http/Https) ---
+      // Jika Input adalah URL (Http/Https)
       if (imageInput.startsWith("http://") || imageInput.startsWith("https://")) {
         console.log(`🤖 AI: Downloading image from URL...`);
         // Download via Axios helper di bawah
         imageBase64 = await this.downloadImageAsBase64(imageInput);
       }
-      // --- LOGIC 2: Jika Input sudah berupa String Base64 (Raw Data) ---
+      // Jika Input sudah berupa String Base64 (Raw Data)
       else if (imageInput.length > 100) {
         console.log("🤖 AI: Receiving direct Base64 input...");
         // Bersihkan prefix 'data:image/jpeg;base64,' jika terbawa, agar murni raw base64
@@ -122,13 +122,11 @@ class AIService {
 
       const rawResponse = await this.adapter.processImage(imageBase64, "image/jpeg", prompt);
 
-      // --- [STEP PERBAIKAN UTAMA: SAFETY CONVERSION] ---
       let textString = "";
 
       if (typeof rawResponse === "string") {
         textString = rawResponse;
       } else if (typeof rawResponse === "object") {
-        // Jika Adapter mengembalikan Object/JSON, kita stringify dulu
         textString = JSON.stringify(rawResponse);
       } else {
         // Jika number atau tipe lain
@@ -137,7 +135,7 @@ class AIService {
 
       console.log(`🔍 DEBUG RAW AI RESPONSE (Type: ${typeof rawResponse}): "${textString}"`);
 
-      // 3. Clean Result (Sekarang aman karena textString PASTI string)
+      // Clean Result (Sekarang aman karena textString PASTI string)
       const cleanText = textString.replace(/[^0-9]/g, "");
       const cleanTotal = parseInt(cleanText) || 0;
 

@@ -1,10 +1,10 @@
 import { Op } from "sequelize";
 import { Notification, Admin } from "../models/index.js";
 import { sendEmailNotification } from "../services/emailService.js";
-import { getHandoffEmailTemplate } from "../utils/emailTemplates.js"; // Import Template Email
+import { getHandoffEmailTemplate } from "../utils/emailTemplates.js";
 import logger from "../utils/logger.js";
 
-// --- API: GET NOTIFICATIONS (Pagination & Search) ---
+// Get notifications
 export const getNotifications = async (req, res, next) => {
   try {
     const { page = 1, limit = 10, search = "", startDate, endDate } = req.query;
@@ -27,7 +27,6 @@ export const getNotifications = async (req, res, next) => {
       order: [["created_at", "DESC"]],
     });
 
-    // Hitung unread terpisah agar akurat
     const unreadCount = await Notification.count({ where: { is_read: false } });
 
     res.status(200).json({
@@ -37,7 +36,7 @@ export const getNotifications = async (req, res, next) => {
         totalItems: count,
         totalPages: Math.ceil(count / limit),
         currentPage: parseInt(page),
-        unreadCount, // Penting untuk Badge Lonceng
+        unreadCount,
       },
     });
   } catch (error) {
@@ -45,7 +44,7 @@ export const getNotifications = async (req, res, next) => {
   }
 };
 
-// --- API: MARK SINGLE READ ---
+// Mark as read
 export const markAsRead = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -56,7 +55,7 @@ export const markAsRead = async (req, res, next) => {
   }
 };
 
-// --- API: MARK ALL READ ---
+// Mark all as read
 export const markAllAsRead = async (req, res, next) => {
   try {
     await Notification.update({ is_read: true }, { where: { is_read: false } });
@@ -66,13 +65,12 @@ export const markAllAsRead = async (req, res, next) => {
   }
 };
 
-// --- INTERNAL: CREATE SYSTEM NOTIFICATION (Dipanggil Webhook) ---
+// create notification
 export const createSystemNotification = async (
   io,
   { title, message, type, referenceId, actionUrl, extraData }
 ) => {
   try {
-    // 1. Simpan DB
     const notif = await Notification.create({
       title,
       message,
@@ -81,13 +79,13 @@ export const createSystemNotification = async (
       action_url: actionUrl,
     });
 
-    // 2. Socket Emit
+    // Socket Emit
     if (io) io.emit("new-notification", notif);
 
-    // 3. Kirim Email jika HUMAN_HANDOFF
+    // Kirim Email jika HUMAN_HANDOFF
     if (type === "HUMAN_HANDOFF") {
       const admins = await Admin.findAll({ attributes: ["email"] });
-      const emailList = admins.map((a) => a.email).filter((e) => e); // Filter null
+      const emailList = admins.map((a) => a.email).filter((e) => e);
 
       if (emailList.length > 0) {
         const htmlContent = getHandoffEmailTemplate({
@@ -96,7 +94,7 @@ export const createSystemNotification = async (
           message: message,
           dashboardUrl: `${process.env.FRONTEND_URL || "http://localhost:5173"}${actionUrl}`,
         });
-        // Send async (jangan await agar tidak block)
+
         sendEmailNotification(emailList, `🚨 [ALERT] ${title}`, htmlContent).catch((e) =>
           logger.error("Email fail:", e)
         );

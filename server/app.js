@@ -5,8 +5,8 @@ import morgan from "morgan";
 import dotenv from "dotenv";
 import http from "http";
 import { Server } from "socket.io";
-import { connectRedis } from "./src/config/redisClient.js";
-import { connectDB } from "./src/config/database.js";
+import { connectRedis, redisClient } from "./src/config/redisClient.js";
+import { connectDB, sequelize } from "./src/config/database.js";
 // import "./src/models/index.js";
 
 import globalErrorHandler from "./src/middleware/errorMiddleware.js";
@@ -29,7 +29,7 @@ const io = new Server(server, {
   cors: {
     // Izinkan origin frontend (Vite biasanya port 5173)
     origin: "*",
-    methods: ["GET", "POST", "PUT", "DELETE"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
     credentials: true,
   },
   // Izinkan transport polling dan websocket
@@ -126,7 +126,7 @@ connectDB();
 app.get("/", (req, res) => {
   res.status(200).json({
     status: "success",
-    message: "MyJek API Service is Secure & Running 🚀",
+    message: "MyJek API Service is Running 🚀",
   });
 });
 
@@ -150,6 +150,33 @@ server.listen(PORT, () => {
   console.log(`🔗 WAHA URL: ${process.env.WAHA_API_URL}`);
   console.log(`========================================\n`);
 });
+
+// Graceful shutdown
+const shutdown = async (signal) => {
+  console.log(`\nReceived ${signal}. Shutting down gracefully...`);
+
+  server.close(async () => {
+    try {
+      await redisClient.quit();
+      await sequelize.close();
+
+      console.log("Shutdown complete.");
+      process.exit(0);
+    } catch (err) {
+      console.error("Shutdown error:", err);
+      process.exit(1);
+    }
+  });
+
+  // Force shutdown jika hang
+  setTimeout(() => {
+    console.error("Force shutdown.");
+    process.exit(1);
+  }, 10000);
+};
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
 
 // Tidak perlu export default app jika server.listen sudah dijalankan di sini
 // Tapi jika dibutuhkan untuk testing, export server-nya

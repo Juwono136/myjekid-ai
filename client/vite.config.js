@@ -3,26 +3,34 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 // https://vite.dev/config/
-export default defineConfig({
-  plugins: [tailwindcss(), react()],
-  server: {
-    proxy: {
-      "/api": {
-        target: "http://localhost:5000",
-        changeOrigin: true,
-        secure: false,
-        ws: true,
-      },
-      "/socket.io": {
-        target: "http://localhost:5000",
-        changeOrigin: true,
-        secure: false,
-        ws: true, // Wajib true untuk WebSocket
+export default defineConfig(({ mode }) => {
+  return {
+    server: {
+      proxy: {
+        "/api": {
+          target:
+            mode === "development"
+              ? "http://localhost:5000"
+              : "https://myjekid-api.portproject.my.id",
+          changeOrigin: true,
+          secure: mode !== "development",
+          ws: true,
+        },
+        "/socket.io": {
+          target:
+            mode === "development"
+              ? "http://localhost:5000"
+              : "https://myjekid-api.portproject.my.id",
+          changeOrigin: true,
+          secure: mode !== "development",
+          ws: true, // Wajib true untuk WebSocket
+        },
       },
     },
-  },
-  build: {
-    outDir: "dist",
-    emptyOutDir: true,
-  },
+    build: {
+      outDir: "dist",
+      emptyOutDir: true,
+    },
+    plugins: [react(), tailwindcss()],
+  };
 });

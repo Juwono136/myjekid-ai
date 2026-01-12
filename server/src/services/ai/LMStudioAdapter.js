@@ -6,16 +6,15 @@ class LMStudioAdapter {
     this.model = model || process.env.LMSTUDIO_MODEL || "gemma-3-12b-it";
     this.apiKey = process.env.LMSTUDIO_API_KEY || "lm-studio";
 
-    // Fix URL path
     if (this.baseUrl.endsWith("/v0")) this.baseUrl = this.baseUrl.replace("/v0", "/v1");
   }
 
-  // --- TEXT CHAT ---
+  // TEXT CHAT
   async generateResponse(systemPrompt, userText, context = {}) {
     try {
       const contextString = JSON.stringify(context, null, 2);
 
-      // SOLUSI ERROR: Gunakan content string biasa, jangan object array.
+      // Gunakan content string biasa, jangan object array.
       const messages = [
         { role: "system", content: systemPrompt },
         {
@@ -44,7 +43,7 @@ class LMStudioAdapter {
     }
   }
 
-  // --- VISION ---
+  // VISION OCR
   async processImage(base64Data, mimeType, prompt) {
     try {
       // Khusus Vision, baru kita pakai format array object
