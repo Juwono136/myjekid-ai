@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   backend:
-    image: juwono136/myjekid-api:latest
+    image: juwono136/myjek-api:latest
     pull_policy: always
     container_name: myjek-api
     restart: always
