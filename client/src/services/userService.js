@@ -4,7 +4,7 @@ export const userService = {
   // Get List dengan Params (page, search, role)
   getUsers: async (params) => {
     const response = await api.get("/admins", { params });
-    return response.data; // Mengembalikan { status, data, meta }
+    return response.data;
   },
 
   // Create User Baru

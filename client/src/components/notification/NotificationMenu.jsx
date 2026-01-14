@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useSelector, useDispatch } from "react-redux";
 import { FiBell, FiChevronRight, FiInbox } from "react-icons/fi";
 import { markNotificationAsRead } from "../../features/notificationSlice";
@@ -9,12 +9,12 @@ import { useNavigate } from "react-router-dom";
 const NotificationMenu = () => {
   const dispatch = useDispatch();
   const { items, unreadCount } = useSelector((state) => state.notifications);
-  const [isOpen, setIsOpen] = useState(false); // State kontrol manual
+  const [isOpen, setIsOpen] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const menuRef = useRef(null);
   const navigate = useNavigate();
 
-  // Close dropdown jika klik di luar
+  // Close dropdown
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (menuRef.current && !menuRef.current.contains(e.target)) setIsOpen(false);
@@ -35,7 +35,7 @@ const NotificationMenu = () => {
 
   return (
     <div className="relative" ref={menuRef}>
-      {/* 1. Tombol Lonceng */}
+      {/* Tombol Lonceng */}
       <button
         onClick={() => setIsOpen(!isOpen)}
         className={`btn btn-ghost btn-circle btn-sm relative transition-all ${
@@ -50,7 +50,7 @@ const NotificationMenu = () => {
         </div>
       </button>
 
-      {/* 2. Dropdown (Manual Absolute Positioning) */}
+      {/* Dropdown*/}
       {isOpen && (
         <div className="absolute right-0 mt-3 w-80 md:w-96 bg-white rounded-xl shadow-2xl border border-gray-100 z-50 animate-in fade-in slide-in-from-top-2 origin-top-right overflow-hidden">
           {/* Header */}
@@ -94,7 +94,7 @@ const NotificationMenu = () => {
         </div>
       )}
 
-      {/* 3. Modal Full */}
+      {/* Modal Full */}
       <NotificationModal isOpen={showModal} onClose={() => setShowModal(false)} />
     </div>
   );

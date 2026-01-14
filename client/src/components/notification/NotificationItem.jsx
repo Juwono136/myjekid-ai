@@ -1,10 +1,8 @@
-import React from "react";
 import { FiAlertTriangle, FiInfo, FiMessageSquare, FiClock } from "react-icons/fi";
 import { formatDistanceToNow } from "date-fns";
 import { id } from "date-fns/locale";
 
 const NotificationItem = ({ notification, onClick }) => {
-  // Icon khusus untuk HUMAN_HANDOFF agar admin aware
   const getIcon = () => {
     switch (notification.type) {
       case "HUMAN_HANDOFF":

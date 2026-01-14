@@ -67,7 +67,6 @@ const ChatSidebar = ({
           sessions.map((session) => {
             const isActive = activeSession?.phone === session.phone;
             const isHuman = session.mode === "HUMAN";
-            // Pastikan unreadCount ada di data redux (default 0 jika undefined)
             const unreadCount = session.unreadCount || 0;
 
             return (
@@ -121,7 +120,7 @@ const ChatSidebar = ({
                         ) : null}
                         <span className="flex justify-center items-center gap-1 text-xs">
                           <FiSmartphone />
-                          {session.phone} {/* Bisa diganti preview last message jika ada di API */}
+                          {session.phone}
                         </span>
                       </div>
 

@@ -38,7 +38,7 @@ export const handleUserMessage = async (
         return {
           reply: `✅ *AKUN TERHUBUNG!*\nHalo ${sapa(
             existingUser.name
-          )}, perangkat berhasil terhubung. Mau pesan apa?`,
+          )}, perangkat kamu berhasil terhubung. Selamat datang di MyJekID - Layanan pesan antar untuk daerah sekitaran Sumbawa. Mau pesan apa kak hari ini? 😃`,
         };
       } else {
         await User.create({
@@ -49,12 +49,12 @@ export const handleUserMessage = async (
         return {
           reply: `✅ *REGISTRASI BERHASIL!*\nSalam kenal ${sapa(
             name
-          )}. Nomor HP ${potentialPhone} sudah tersimpan.\n\nMau pesan makan apa hari ini?`,
+          )}. Nomor HP ${potentialPhone} sudah tersimpan di sistem kami kak. Selamat datang di MyJekID - Layanan pesan antar untuk daerah sekitaran Sumbawa.\n\nMau pesan makan apa hari ini? 😃`,
         };
       }
     } else {
       return {
-        reply: `👋 Halo Kak! Selamat datang di MyJek.\n\nKarena Kakak baru pertama kali chat, mohon verifikasi nomor HP dulu ya.\n\n👉 *Silakan ketik Nomor WA Kakak* (Contoh: 08123456789).`,
+        reply: `👋 Halo Kak! Selamat datang di MyJekID - Layanan pesan antar untuk daerah sekitar Sumbawa.\n\nKarena Kakak baru pertama kali chat, mohon verifikasi nomor HP dulu ya.\n\n👉 *Silakan ketik Nomor WA Kakak* (Contoh: 08123456789).`,
       };
     }
   }
@@ -88,7 +88,7 @@ export const handleUserMessage = async (
   // HANDLER KHUSUS LOKASI (UPDATE KOORDINAT)
   if (locationData && locationData.latitude) {
     console.log(
-      `📍 User ${name} Shared Location: ${locationData.latitude}, ${locationData.longitude}`
+      `User ${name} Shared Location: ${locationData.latitude}, ${locationData.longitude}`
     );
 
     // Update DB User (Permanen)
@@ -107,7 +107,7 @@ export const handleUserMessage = async (
     await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
 
     return {
-      reply: `✅ *TITIK LOKASI DITERIMA!*\n\nKoordinat peta sudah diperbarui. Kurir akan mengacu pada titik ini.\n\nApakah pesanan sudah benar semua? Balas *YA* untuk konfirmasi order yah kak.`,
+      reply: `✅ *TITIK LOKASI DITERIMA!*\n\nKoordinat peta sudah saya diperbarui yah kak. Kurir akan mengacu pada titik ini untuk mengantarkan order kakak nantinya.\n\nApakah pesanan sudah benar semua? Balas *YA* untuk konfirmasi order yah kak. 😃🙏`,
     };
   }
 
@@ -122,7 +122,10 @@ export const handleUserMessage = async (
   }
 
   if (text.trim().startsWith("#")) {
-    return { reply: "⚠️ Perintah tidak dikenali." };
+    return {
+      reply:
+        "Mohon maaf kak, perintah tersebut belum saya kenali saat ini. Ketik #INFO untuk melihat informasi kurir.. 🙏",
+    };
   }
 
   try {
@@ -192,8 +195,8 @@ export const handleUserMessage = async (
       finalReply = activeOrder
         ? `Sama-sama Kak! Pesanan Kakak saat ini *${getStatusMessage(
             activeOrder.status
-          )}*. Ditunggu ya 😃`
-        : "Sama-sama Kak! Kabari saja kalau mau pesan lagi ya.";
+          )}*. Ditunggu ya kak.. 😃`
+        : "Sama-sama Kak! Kabari saja kalau mau pesan lagi ya. 😃🙏";
     }
 
     // CONFIRM FINAL
@@ -207,15 +210,17 @@ export const handleUserMessage = async (
         const hasLocation = user.latitude || sessionDraft.has_coordinate;
 
         if (!validItems) {
-          finalReply = "⚠️ Mohon maaf Kak, belum ada menu yang dipesan. Mau pesan apa?";
+          finalReply = "Mohon maaf Kak, belum ada menu yang dipesan nih. Mau pesan apa kak?";
         } else if (!validPickup) {
-          finalReply = "⚠️ Mohon maaf Kak, lokasi pengambilan (Warung/Toko) belum ada.";
+          finalReply =
+            "Mohon maaf Kak, lokasi pengambilan (Warung/Toko) belum ada. Mohon diinfo lokasi pengambilan ordernya (Contoh: Warung Bu Sri)";
         } else if (!validAddress) {
-          finalReply = "⚠️ Mohon maaf Kak, *Alamat Pengantaran* belum diisi nih.";
+          finalReply =
+            "Mohon maaf Kak, *Alamat Pengantaran* belum diisi nih. Mohon diinfokan terlebih dulu ke saya kak 🙏";
         }
         // BLOCKING JIKA TIDAK ADA LOKASI
         else if (!hasLocation) {
-          finalReply = `⛔ *EITS, TUNGGU DULU!*\n\nDemi kelancaran, Kakak *WAJIB* mengirimkan Share Location (Titik Peta) rumah kakak.\n\n👉 Klik tombol *Clip (📎)* di WA -> Pilih *Location* -> *Send Your Current Location*.\n\n_Setelah kirim lokasi, baru balas YA lagi._`;
+          finalReply = `*TUNGGU DULU KAK!*\n\nDemi kelancaran, Kakak *WAJIB* mengirimkan Share Location (Titik Peta) rumah kakak terlebih dahulu.\n\n👉 Silahkan klik tombol *Clip (📎)* di WA -> Pilih *Location* -> *Send Your Current Location*.\n\n_Setelah kirim lokasi, baru balas YA lagi yah kak._ 😅🙏`;
         } else {
           // EKSEKUSI ORDER
           await draftOrder.update({ status: "LOOKING_FOR_DRIVER" });
@@ -238,9 +243,11 @@ export const handleUserMessage = async (
           )}*.\n\nSistem sedang mencarikan kurir terdekat. Mohon tunggu sebentar yah kak...`;
         }
       } else if (activeOrder) {
-        finalReply = `Pesanan Kakak *${getStatusMessage(activeOrder.status)}*. Mohon ditunggu.`;
+        finalReply = `Pesanan Kakak *${getStatusMessage(
+          activeOrder.status
+        )}*. Mohon ditunggu yah kak.`;
       } else {
-        finalReply = "Siap Kak! Ada yang bisa saya bantu pesankan lagi?";
+        finalReply = "Siap Kak! Ada yang bisa saya bantu pesankan lagi? 😃";
       }
     }
 
@@ -249,7 +256,7 @@ export const handleUserMessage = async (
       if (activeOrder) {
         finalReply = `Halo Kak ${sapa(user.name)}, pesanan Kakak saat ini *${getStatusMessage(
           activeOrder.status
-        )}*.\n\nMohon ditunggu ya!`;
+        )}*.\n\nMohon ditunggu ya kak..`;
       } else if (draftOrder) {
         finalReply = `Kakak punya pesanan Draft yang belum dikonfirmasi nih. Mau dilanjutin?`;
       } else {
@@ -262,9 +269,11 @@ export const handleUserMessage = async (
       if (draftOrder) {
         await draftOrder.update({ status: "CANCELLED" });
         await redisClient.del(redisKey);
-        finalReply = `👌 Oke, Pesanan baru (Draft) *${getStatusMessage("CANCELLED")}*.`;
+        finalReply = `Oke Siap, Pesanan/order baru tersebut *${getStatusMessage(
+          "CANCELLED"
+        )}*. Ditunggu order selanjutnya yah kak 😅🙏`;
       } else {
-        finalReply = "Tidak ada pesanan draft yang aktif.";
+        finalReply = "Tidak ada pesanan/order yang aktif saat ini nih kak. Mau pesan apa kak?";
       }
     }
 
@@ -279,7 +288,7 @@ export const handleUserMessage = async (
         });
       } else {
         if (mergedItems.length === 0) {
-          return { reply: "Halo Kak! Mau pesan menu apa hari ini?" };
+          return { reply: "Halo Kak! Mau pesan/order apa hari ini kak?" };
         }
         const addr = mergedAddress || user.address_text || "";
         await orderService.createFromAI(phone, {
@@ -301,12 +310,12 @@ export const handleUserMessage = async (
       if (hasItems && hasPickup && hasAddress) {
         finalReply = formatSummaryReply(name, mergedItems, mergedPickup, finalAddress);
         if (!user.latitude) {
-          finalReply += `\n\n⚠️ *PENTING:* Kakak belum mengirim Share Location.\nMohon kirim *Lokasi Peta (📎)* sekarang agar bisa lanjut pesan (👉 Klik tombol Clip (📎) di WA -> Pilih Location -> Send Your Current Location).`;
+          finalReply += `\n\n*PENTING:* Kakak belum mengirim Share Location.\nMohon kirim *Lokasi Peta (📎)* sekarang agar bisa lanjut pesan (👉 Klik tombol Clip (📎) di WA -> Pilih Location -> Send Your Current Location).`;
         }
       } else {
         if (!hasItems) finalReply = "Siap Kak. Mau pesan menu apa?";
         else if (!hasPickup)
-          finalReply = `Oke, pesan *${mergedItems[0].item}*. Mau dibelikan di mana?`;
+          finalReply = `Oke, pesan *${mergedItems[0].item}*. Mau dibelikan di mana kak? 🙏`;
         else
           finalReply = `Siap, *${mergedItems[0].item}* dari *${mergedPickup}*.\n\nMau diantar ke alamat mana Kak?`;
       }
@@ -318,6 +327,9 @@ export const handleUserMessage = async (
     return { reply: finalReply };
   } catch (error) {
     console.error("❌ User Flow Error:", error);
-    return { reply: "⚠️ Maaf, terjadi kendala teknis. Saya alihkan ke Admin sebentar ya." };
+    return {
+      reply:
+        "Maaf, sepertinya telah terjadi kendala teknis nih. Mohon tunggu beberapa saat lagi.\n\nMohon maaf sebelumnya yah kak 🙏",
+    };
   }
 };

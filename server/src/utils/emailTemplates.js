@@ -1,5 +1,3 @@
-// server/src/utils/emailTemplates.js
-
 export const getHandoffEmailTemplate = (data) => {
   const { userName, userPhone, message, dashboardUrl } = data;
 

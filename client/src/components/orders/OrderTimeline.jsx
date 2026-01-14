@@ -1,4 +1,3 @@
-import React from "react";
 import { format } from "date-fns";
 import { id } from "date-fns/locale";
 import { FiClock, FiUser, FiCheckCircle, FiCircle } from "react-icons/fi";

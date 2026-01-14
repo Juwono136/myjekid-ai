@@ -1,4 +1,3 @@
-// src/routes/apiRoutes.js
 import express from "express";
 import { loginAdmin, getMe, updateProfile, updatePassword } from "../controllers/authController.js";
 import {
@@ -82,7 +81,6 @@ router.put("/admins/:id", restrictTo("SUPER_ADMIN"), updateAdmin);
 router.delete("/admins/:id", restrictTo("SUPER_ADMIN"), deleteAdmin);
 
 // MANAJEMEN KURIR
-// Semua Admin boleh lihat list & status
 router.get("/couriers", getAllCouriers);
 router.post("/couriers", createCourier);
 router.put("/couriers/:id", updateCourier);

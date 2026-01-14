@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
@@ -22,13 +22,11 @@ const NotificationModal = ({ isOpen, onClose }) => {
   const [page, setPage] = useState(1);
   const debouncedSearch = useDebounce(search, 500);
 
-  /* ================= BODY SCROLL LOCK ================= */
   useEffect(() => {
     if (isOpen) document.body.style.overflow = "hidden";
     return () => (document.body.style.overflow = "");
   }, [isOpen]);
 
-  /* ================= INITIAL LOAD ================= */
   useEffect(() => {
     if (!isOpen) return;
 
@@ -43,7 +41,6 @@ const NotificationModal = ({ isOpen, onClose }) => {
     );
   }, [isOpen, debouncedSearch, dispatch]);
 
-  /* ================= LOAD MORE ================= */
   useEffect(() => {
     if (page > 1 && isOpen) {
       dispatch(
@@ -77,7 +74,6 @@ const NotificationModal = ({ isOpen, onClose }) => {
 
   if (!isOpen) return null;
 
-  /* ================= PORTAL ================= */
   return createPortal(
     <div className="fixed inset-0 z-9999 flex items-center justify-center">
       {/* BACKDROP */}
@@ -101,7 +97,7 @@ const NotificationModal = ({ isOpen, onClose }) => {
         animate-in zoom-in-95 duration-200
       "
       >
-        {/* ================= HEADER ================= */}
+        {/* HEADER */}
         <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-white sticky top-0 z-20">
           <div>
             <h2 className="text-lg font-bold text-gray-800">Notifikasi</h2>
@@ -124,7 +120,7 @@ const NotificationModal = ({ isOpen, onClose }) => {
           </div>
         </div>
 
-        {/* ================= SEARCH ================= */}
+        {/* SEARCH */}
         <div className="px-6 py-3 bg-gray-50 border-b border-gray-100 sticky top-18 z-10">
           <div className="relative">
             <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -145,7 +141,7 @@ const NotificationModal = ({ isOpen, onClose }) => {
           </div>
         </div>
 
-        {/* ================= LIST ================= */}
+        {/* LIST */}
         <div ref={listRef} onScroll={handleScroll} className="flex-1 overflow-y-auto bg-gray-50">
           {items.length === 0 && !isLoading ? (
             <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-3">

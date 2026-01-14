@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import {
   fetchCouriers,
@@ -7,15 +7,10 @@ import {
   deleteCourier,
   resetState,
 } from "../features/courierSlice";
-
-// --- LIBRARY ---
 import toast from "react-hot-toast";
-import { FiTruck, FiFilter } from "react-icons/fi";
-
-// --- HOOKS ---
+import { FiFilter } from "react-icons/fi";
 import useDebounce from "../hooks/useDebounce";
 
-// --- COMPONENTS ---
 import PageHeader from "../components/common/PageHeader";
 import Pagination from "../components/common/Pagination";
 import TableActions from "../components/common/TableActions";
@@ -27,10 +22,9 @@ const CourierManagement = () => {
   const dispatch = useDispatch();
   const { couriers, meta, isLoading, isError, message } = useSelector((state) => state.courier);
 
-  // --- STATE ---
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
-  const [sort, setSort] = useState("created_at:desc"); // State gabungan untuk UI
+  const [sort, setSort] = useState("created_at:desc");
   const [currentPage, setCurrentPage] = useState(1);
 
   // Debounce Search
@@ -42,9 +36,7 @@ const CourierManagement = () => {
   const [selectedCourier, setSelectedCourier] = useState(null);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
 
-  // --- FETCH DATA ---
   useEffect(() => {
-    // [FIX SORTING] Pecah "field:direction" menjadi "sortBy" dan "order"
     const [sortBy, order] = sort.split(":");
 
     const params = {
@@ -52,8 +44,8 @@ const CourierManagement = () => {
       limit: 10,
       search: debouncedSearch,
       status: statusFilter,
-      sortBy: sortBy, // Kirim sebagai sortBy (sesuai controller)
-      order: order, // Kirim sebagai order (sesuai controller)
+      sortBy: sortBy,
+      order: order,
     };
 
     dispatch(fetchCouriers(params));
@@ -66,7 +58,6 @@ const CourierManagement = () => {
     }
   }, [isError, message, dispatch]);
 
-  // --- HANDLERS ---
   const handleSearchChange = (val) => {
     setSearch(val);
     setCurrentPage(1);
@@ -140,11 +131,6 @@ const CourierManagement = () => {
       );
     }
   };
-
-  const breadcrumbItems = [
-    { label: "Dashboard", path: "/dashboard" },
-    { label: "Mitra Kurir", path: "/couriers", active: true },
-  ];
 
   const sortOptions = [
     { label: "Terbaru", value: "created_at:desc" },

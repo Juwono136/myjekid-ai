@@ -3,29 +3,29 @@ import api from "./api";
 const API_URL = "/reports";
 
 const reportService = {
-  // 1. Get Summary Cards
+  // Get Summary Cards
   getSummary: async (params) => {
     const response = await api.get(`${API_URL}/summary`, { params });
     return response.data;
   },
 
-  // 2. Get Chart Data
+  // Get Chart Data
   getChartData: async (params) => {
     const response = await api.get(`${API_URL}/chart`, { params });
     return response.data;
   },
 
-  // 3. Get Transactions List
+  // Get Transactions List
   getTransactions: async (params) => {
     const response = await api.get(`${API_URL}/transactions`, { params });
     return response.data;
   },
 
-  // 4. Download Excel (BLOB Handling)
+  // Download Excel (BLOB Handling)
   downloadExcel: async (params) => {
     const response = await api.get(`${API_URL}/export/excel`, {
       params,
-      responseType: "blob", // PENTING: Agar dibaca sebagai file, bukan JSON
+      responseType: "blob",
     });
 
     // Logic auto-download di browser

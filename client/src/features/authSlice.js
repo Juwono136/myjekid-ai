@@ -9,9 +9,7 @@ export const loginUser = createAsyncThunk(
       const response = await api.post("/auth/login", credentials);
       return response.data;
     } catch (error) {
-      // PERBAIKAN: Tangkap data error dengan aman
       if (error.response && error.response.data) {
-        // Mengembalikan seluruh object error dari backend ({ status, message })
         return rejectWithValue(error.response.data);
       } else {
         return rejectWithValue({ message: "Gagal terhubung ke server (Network Error)" });
@@ -20,7 +18,7 @@ export const loginUser = createAsyncThunk(
   }
 );
 
-// 3. [BARU] Update Profile
+// Update Profile
 export const updateProfile = createAsyncThunk("auth/updateProfile", async (userData, thunkAPI) => {
   try {
     return await authService.updateProfile(userData);
@@ -33,7 +31,7 @@ export const updateProfile = createAsyncThunk("auth/updateProfile", async (userD
   }
 });
 
-// 4. [BARU] Update Password
+// Update Password
 export const updatePassword = createAsyncThunk(
   "auth/updatePassword",
   async (passwordData, thunkAPI) => {
@@ -91,18 +89,16 @@ const authSlice = createSlice({
         state.loading = false;
         state.error = action.payload?.message || "Login Gagal";
       })
-      // --- HANDLE UPDATE PROFILE ---
+
       .addCase(updateProfile.pending, (state) => {
         state.loading = true;
-        state.success = false; // Reset status sukses sebelumnya
+        state.success = false;
         state.error = false;
       })
       .addCase(updateProfile.fulfilled, (state, action) => {
         state.loading = false;
         state.success = true;
 
-        // FIX: Backend mengembalikan { status: "success", data: { ... } }
-        // Jadi kita harus ambil action.payload.data
         const updatedUserData = action.payload.data || action.payload;
 
         if (state.user) {
@@ -120,7 +116,6 @@ const authSlice = createSlice({
         state.message = action.payload;
       })
 
-      // --- HANDLE UPDATE PASSWORD ---
       .addCase(updatePassword.pending, (state) => {
         state.loading = true;
         state.success = false;
@@ -129,7 +124,6 @@ const authSlice = createSlice({
       .addCase(updatePassword.fulfilled, (state, action) => {
         state.loading = false;
         state.success = true;
-        // Password tidak return data user, jadi cukup set message
         state.message = action.payload.message || "Password berhasil diubah.";
       })
       .addCase(updatePassword.rejected, (state, action) => {

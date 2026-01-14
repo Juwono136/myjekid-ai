@@ -6,15 +6,13 @@ import ConfirmationModal from "../components/ConfirmationModal";
 import toast from "react-hot-toast";
 import { userService } from "../services/userService";
 
-// Modular Components
 import PageHeader from "../components/common/PageHeader";
 import TableActions from "../components/common/TableActions";
 import Pagination from "../components/common/Pagination";
 import EmptyState from "../components/common/EmptyState";
-import UserFormModal from "../components/userManagement/UserFormModal"; // Import Modal Baru
+import UserFormModal from "../components/userManagement/UserFormModal";
 
 const UserManagement = () => {
-  // --- STATE ---
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -26,11 +24,9 @@ const UserManagement = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
-  // --- MODAL STATES ---
-  // 1. Modal Form (Input Data)
   const [formModal, setFormModal] = useState({ open: false, mode: "ADD", data: null });
 
-  // 2. Modal Konfirmasi (Untuk Delete & Submit Form)
+  // Modal Konfirmasi (Untuk Delete & Submit Form)
   const [confirmModal, setConfirmModal] = useState({
     open: false,
     type: "DELETE", // "DELETE" or "SUBMIT"
@@ -39,7 +35,6 @@ const UserManagement = () => {
     dataPayload: null,
   });
 
-  // --- FETCHING ---
   const fetchUsers = async () => {
     setLoading(true);
     try {
@@ -66,19 +61,14 @@ const UserManagement = () => {
     fetchUsers();
   }, [debouncedSearch, filterRole, sortBy, currentPage]);
 
-  // --- HANDLERS: FORM ACTIONS ---
-
-  // 1. Buka Modal Add
   const handleAddClick = () => {
     setFormModal({ open: true, mode: "ADD", data: null });
   };
 
-  // 2. Buka Modal Edit
   const handleEditClick = (user) => {
     setFormModal({ open: true, mode: "EDIT", data: user });
   };
 
-  // 3. Saat Form di-Submit (Belum ke API, Konfirmasi dulu)
   const handleFormSubmit = (formData) => {
     // Tutup form modal dulu
     setFormModal({ ...formModal, open: false });
@@ -96,7 +86,6 @@ const UserManagement = () => {
     });
   };
 
-  // --- HANDLERS: DELETE ACTIONS ---
   const handleDeleteClick = (user) => {
     setConfirmModal({
       open: true,
@@ -107,7 +96,6 @@ const UserManagement = () => {
     });
   };
 
-  // --- EKSEKUSI AKHIR (API CALL) ---
   const executeAction = async () => {
     const { type, dataPayload } = confirmModal;
 
@@ -141,7 +129,6 @@ const UserManagement = () => {
     }
   };
 
-  // --- HELPER RENDER ---
   const formatDate = (dateString) => {
     if (!dateString) return "-";
     return new Date(dateString).toLocaleDateString("id-ID", {
@@ -218,7 +205,6 @@ const UserManagement = () => {
                           <div className="avatar placeholder">
                             <div className="bg-neutral-100 text-neutral-500 mask mask-squircle w-12 h-12 flex items-center justify-center border border-gray-100">
                               <span className="text-xl font-bold">
-                                {/* Safety Check: pastikan full_name ada sebelum charAt */}
                                 {u.full_name ? u.full_name.charAt(0).toUpperCase() : "?"}
                               </span>
                             </div>
@@ -240,27 +226,25 @@ const UserManagement = () => {
                         </div>
                       </td>
 
-                      {/* KOLOM ROLE (Perbaikan Safety Check) */}
+                      {/* KOLOM ROLE*/}
                       <td>
                         <div
                           className={`badge w-max ${getRoleBadge(
                             u.role
                           )} border px-3 py-3 rounded-lg font-bold text-[10px] tracking-wide`}
                         >
-                          {/* Safety Check: pastikan role ada */}
+                          {/* Pastikan role ada */}
                           {u.role ? u.role.replace("_", " ") : "UNKNOWN"}
                         </div>
                       </td>
 
-                      {/* KOLOM STATUS (PERBAIKAN ERROR CLASSNAME) */}
+                      {/* KOLOM STATUS */}
                       <td>
-                        {/* Gunakan string template literal yang bersih */}
                         <div
                           className={`flex items-center gap-2 text-xs font-semibold ${
                             u.is_active ? "text-green-600" : "text-gray-400"
                           }`}
                         >
-                          {/* Perbaikan: Pastikan className selalu string */}
                           <span
                             className={`w-2 h-2 rounded-full ${
                               u.is_active ? "bg-green-500 animate-pulse" : "bg-gray-300"
@@ -319,7 +303,7 @@ const UserManagement = () => {
         )}
       </div>
 
-      {/* 1. MODAL FORM INPUT */}
+      {/* MODAL FORM INPUT */}
       <UserFormModal
         isOpen={formModal.open}
         mode={formModal.mode}
@@ -328,7 +312,7 @@ const UserManagement = () => {
         onSubmit={handleFormSubmit}
       />
 
-      {/* 2. MODAL KONFIRMASI (Reusable untuk Delete & Submit) */}
+      {/* MODAL KONFIRMASI (Reusable untuk Delete & Submit) */}
       <ConfirmationModal
         isOpen={confirmModal.open}
         onClose={() => setConfirmModal({ ...confirmModal, open: false })}

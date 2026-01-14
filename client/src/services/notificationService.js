@@ -1,12 +1,11 @@
-import api from "./api"; // Pastikan path axios instance Anda benar
+import api from "./api";
 
 const notificationService = {
-  // GET Data (Pagination & Search)
+  // Get notification data (Pagination & Search)
   getNotifications: async (page = 1, limit = 10, search = "") => {
     const response = await api.get("/notifications", {
       params: { page, limit, search },
     });
-    // Response Backend: { status: "success", data: { items: [], unreadCount: 0, ... } }
     return response.data;
   },
 

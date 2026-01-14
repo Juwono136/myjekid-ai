@@ -1,20 +1,18 @@
-import React, { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { fetchOrders } from "../features/orderSlice";
 import useDebounce from "../hooks/useDebounce";
 
-// Components
 import PageHeader from "../components/common/PageHeader";
 import TableActions from "../components/common/TableActions";
 import Pagination from "../components/common/Pagination";
-import OrderTable from "../components/orders/OrderTable"; // New Modular Table
+import OrderTable from "../components/orders/OrderTable";
 import OrderDetailModal from "../components/orders/OrderDetailModal";
 
 const OrderMonitor = () => {
   const dispatch = useDispatch();
   const { orders, pagination, isLoading } = useSelector((state) => state.orders);
 
-  // --- LOCAL STATE ---
   const [searchTerm, setSearchTerm] = useState("");
   const debouncedSearch = useDebounce(searchTerm, 500);
 
@@ -32,12 +30,10 @@ const OrderMonitor = () => {
     orderId: null,
   });
 
-  // --- EFFECT: SINKRONISASI SEARCH ---
   useEffect(() => {
     setParams((prev) => ({ ...prev, search: debouncedSearch, page: 1 }));
   }, [debouncedSearch]);
 
-  // --- EFFECT: FETCH DATA ---
   const fetchData = useCallback(() => {
     const apiParams = { ...params };
     if (apiParams.status === "ALL") delete apiParams.status;
@@ -48,7 +44,6 @@ const OrderMonitor = () => {
     fetchData();
   }, [fetchData]);
 
-  // --- HANDLERS ---
   const handleSortChange = (value) => {
     const [sortBy, sortOrder] = value.split("-");
     setParams((prev) => ({ ...prev, sortBy, sortOrder }));

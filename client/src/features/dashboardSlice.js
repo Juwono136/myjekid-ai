@@ -14,9 +14,7 @@ const initialState = {
   message: "",
 };
 
-// Async Thunk
 export const getDashboardStats = createAsyncThunk("dashboard/getStats", async (range, thunkAPI) => {
-  // Perhatikan parameter 'range' disini
   try {
     return await dashboardService.getStats(range);
   } catch (error) {
@@ -47,14 +45,7 @@ export const dashboardSlice = createSlice({
       .addCase(getDashboardStats.fulfilled, (state, action) => {
         state.isLoading = false;
         state.isSuccess = true;
-
-        // --- DEBUGGING LOG (Cek Console Browser saat refresh) ---
-        console.log("📦 [REDUX] Payload diterima:", action.payload);
-
-        // --- MAPPING DATA (PERBAIKAN UTAMA DISINI) ---
-        // Backend mengirim: { status: "success", data: { stats, charts, recentOrders } }
-        // Jadi kita akses via action.payload.data
-
+        // console.log("[REDUX] Payload diterima:", action.payload);
         if (action.payload && action.payload.data) {
           state.stats = action.payload.data.stats;
 

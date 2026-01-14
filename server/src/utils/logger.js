@@ -12,12 +12,12 @@ const logger = winston.createLogger({
     logFormat
   ),
   transports: [
-    // 1. Simpan Error Level ke file error.log
+    // Simpan Error Level ke file error.log
     new winston.transports.File({
       filename: "logs/error.log",
       level: "error",
     }),
-    // 2. Simpan Semua Level ke file combined.log
+    // Simpan Semua Level ke file combined.log
     new winston.transports.File({
       filename: "logs/combined.log",
     }),

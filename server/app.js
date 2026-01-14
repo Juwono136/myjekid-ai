@@ -24,10 +24,10 @@ const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 5000;
 
-// --- SETUP SOCKET.IO ---
+// SETUP SOCKET.IO
 const io = new Server(server, {
   cors: {
-    // Izinkan origin frontend (Vite biasanya port 5173)
+    // Izinkan origin frontend
     origin: "*",
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
     credentials: true,
@@ -45,7 +45,7 @@ io.on("connection", (socket) => {
   });
 });
 
-// TANGANI ERROR SOCKET (Agar tidak crash saat Frontend refresh)
+// ERROR HANDLER SOCKET (Agar tidak crash saat Frontend refresh)
 io.engine.on("connection_error", (err) => {
   // Kode error 0-5 biasanya gangguan koneksi biasa saat dev (ignore saja)
   const isDevNoise = err.code < 5;
@@ -61,10 +61,10 @@ app.use(cors());
 app.use(
   morgan(
     (tokens, req, res) => {
-      // 1. SKIP LOG SOCKET.IO agar terminal bersih
+      // SKIP LOG SOCKET.IO agar terminal bersih
       if (req.url.includes("/socket.io")) return null;
 
-      // 2. Return JSON String
+      // Return JSON String
       return JSON.stringify({
         method: tokens.method(req, res),
         url: tokens.url(req, res),
@@ -79,7 +79,6 @@ app.use(
             // Parse JSON string dari Morgan
             const logData = JSON.parse(message);
 
-            // --- LOGIC PEMISAH LOG (INFO vs ERROR) ---
             const statusCode = parseInt(logData.status) || 200;
 
             if (statusCode >= 500) {

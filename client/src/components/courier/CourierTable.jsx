@@ -1,4 +1,3 @@
-import React from "react";
 import { FiEdit, FiTrash2 } from "react-icons/fi";
 import EmptyState from "../common/EmptyState";
 import Loader from "../Loader";
@@ -49,7 +48,6 @@ const CourierTable = ({ couriers, isLoading, onEdit, onDelete }) => {
                 </td>
               </tr>
             ) : couriers.length === 0 ? (
-              /* EMPTY STATE (FIXED) */
               /* Langsung render komponen karena EmptyState Anda sudah punya <tr> sendiri */
               <EmptyState message="Data kurir tidak ditemukan." />
             ) : (

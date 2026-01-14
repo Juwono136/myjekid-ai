@@ -5,7 +5,6 @@ import { loginUser } from "../features/authSlice";
 import toast from "react-hot-toast";
 import logoImg from "../assets/logo.png";
 
-// Icons
 import { FiMail, FiLock, FiEye, FiEyeOff, FiArrowRight } from "react-icons/fi";
 import { BiLoaderAlt } from "react-icons/bi";
 
@@ -44,18 +43,13 @@ const Login = () => {
     } catch (errPayload) {
       // GAGAL
       console.error("Login Error Payload:", errPayload);
-
-      // Ambil message dari payload backend
       const errorMessage = errPayload?.message || "Login Gagal.";
-
-      // Tampilkan Toast Merah
       toast.error(errorMessage);
     }
   };
 
   return (
     <div className="min-h-screen w-full flex items-center justify-center relative overflow-hidden bg-gray-50">
-      {/* --- INLINE STYLE FOR ANIMATION (No Config Needed) --- */}
       <style>{`
         @keyframes slideUpFade {
           0% { opacity: 0; transform: translateY(30px); }
@@ -91,7 +85,7 @@ const Login = () => {
           <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20"></div>
 
           <div className="relative z-10 flex flex-col items-center text-center">
-            {/* Logo Placeholder - Text based for now */}
+            {/* Logo Placeholder */}
             <div className="bg-white text-[#c73d06] w-28 h-28 rounded-2xl flex items-center justify-center text-4xl font-black shadow-lg mb-6 rotate-3 hover:rotate-0 transition-all duration-300">
               <img src={logoImg} alt="logo-image" className="p-3" />
             </div>

@@ -1,7 +1,7 @@
 import { Navigate, Outlet } from "react-router-dom";
 
 const ProtectedRoute = () => {
-  // Cek token dari LocalStorage (Sumber kebenaran utama untuk session persisten)
+  // Cek token dari LocalStorage
   const token = localStorage.getItem("token");
 
   // Jika tidak ada token, langsung arahkan ke Login

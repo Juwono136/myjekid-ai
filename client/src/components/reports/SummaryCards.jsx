@@ -1,6 +1,5 @@
 import { FiDollarSign, FiShoppingBag, FiXOctagon, FiTrendingUp } from "react-icons/fi";
 
-// Sub-komponen agar kode rapi
 const StatCard = ({ title, value, icon, colorTheme, subText }) => {
   // Mapping warna tema
   const themes = {
@@ -16,7 +15,7 @@ const StatCard = ({ title, value, icon, colorTheme, subText }) => {
     <div className="bg-white p-6 rounded-2xl shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)] border border-gray-100 hover:border-blue-200 transition-all duration-300 group">
       <div className="flex justify-between items-start mb-4">
         <div className={`p-3 rounded-xl ${currentTheme} transition-colors`}>{icon}</div>
-        {/* Placeholder untuk Badge Kenaikan (Logic bisa ditambah nanti) */}
+        {/* Placeholder untuk Badge Kenaikan */}
         {/* <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded-full">+12%</span> */}
       </div>
 

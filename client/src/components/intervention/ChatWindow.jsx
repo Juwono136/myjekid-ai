@@ -4,7 +4,6 @@ import { toggleSessionMode } from "../../features/interventionSlice";
 import toast from "react-hot-toast";
 import { FiMessageSquare } from "react-icons/fi";
 
-// Import Bagian Modular (Pastikan path benar)
 import ChatHeader from "./ChatHeader";
 import MessageList from "./MessageList";
 import ChatInput from "./ChatInput";
@@ -16,16 +15,14 @@ const ChatWindow = ({ session, messages = [], isLoadingHistory, onBack, onSendMe
 
   // State Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [pendingMode, setPendingMode] = useState(null); // Mode tujuan
+  const [pendingMode, setPendingMode] = useState(null);
 
-  // --- LOGIC HANDLE MODE (UPDATE: SELALU MODAL) ---
   const handleToggleRequest = () => {
     if (session.mode === "BOT") {
       setPendingMode("HUMAN");
     } else {
       setPendingMode("BOT");
     }
-    // Selalu buka modal untuk konfirmasi kedua arah
     setIsModalOpen(true);
   };
 
@@ -66,24 +63,22 @@ const ChatWindow = ({ session, messages = [], isLoadingHistory, onBack, onSendMe
   const isHuman = session.mode === "HUMAN";
 
   return (
-    // FIX CSS MOBILE: h-full (atau h-[100dvh] jika browser mobile address bar masalah)
     <div className="flex flex-col w-full h-dvh bg-white relative mb-16 md:mb-0">
-      {/* 1. Modal */}
+      {/* Modal */}
       <ModeToggleModal
         isOpen={isModalOpen}
-        targetMode={pendingMode} // Kirim target mode agar teks modal dinamis
+        targetMode={pendingMode}
         onClose={() => setIsModalOpen(false)}
         onConfirm={executeToggle}
       />
 
-      {/* 2. Header (Flex None - Tinggi Tetap) */}
+      {/* Header */}
       <ChatHeader session={session} onBack={onBack} onToggleMode={handleToggleRequest} />
 
-      {/* 3. Messages Area (Flex-1 - Isi Sisa Ruang) */}
+      {/* Messages Area */}
       <MessageList messages={messages} session={session} />
 
-      {/* 4. Footer Area (Flex None - Tinggi Tetap & Z-Index Tinggi) */}
-      {/* Bungkus dalam div dengan z-index agar selalu di atas */}
+      {/* 4. Footer Area */}
       <div className="flex-none z-40 bg-white sticky bottom-0 w-full">
         {isHuman ? (
           <ChatInput onSendMessage={onSendMessage} />

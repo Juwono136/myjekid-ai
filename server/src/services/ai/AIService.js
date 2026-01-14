@@ -79,7 +79,7 @@ class AIService {
   // Fungsi untuk Membaca Struk/Invoice
   async readInvoice(imageInput, itemsSummary = []) {
     try {
-      console.log("🤖 AI Processing: Start reading invoice...");
+      console.log("AI Processing: Start reading invoice...");
 
       let imageBase64 = "";
 
@@ -103,7 +103,7 @@ class AIService {
         );
       }
 
-      console.log("✅ Image ready. Asking Adapter to process...");
+      console.log("Image ready. Asking Adapter to process...");
 
       const prompt = `
         Peran: Kamu adalah mesin OCR (Optical Character Recognition) khusus struk belanja.
@@ -133,16 +133,16 @@ class AIService {
         textString = String(rawResponse);
       }
 
-      console.log(`🔍 DEBUG RAW AI RESPONSE (Type: ${typeof rawResponse}): "${textString}"`);
+      console.log(`DEBUG RAW AI RESPONSE (Type: ${typeof rawResponse}): "${textString}"`);
 
       // Clean Result (Sekarang aman karena textString PASTI string)
       const cleanText = textString.replace(/[^0-9]/g, "");
       const cleanTotal = parseInt(cleanText) || 0;
 
-      console.log(`💰 AI Parsed Result: Rp ${cleanTotal}`);
+      console.log(`AI Parsed Result: Rp ${cleanTotal}`);
       return { total: cleanTotal };
     } catch (error) {
-      console.error("❌ AI Service Error:", error.message);
+      console.error("AI Service Error:", error.message);
       // Return 0 agar tidak crash, flow bisa lanjut ke input manual
       return { total: 0 };
     }
@@ -160,7 +160,7 @@ class AIService {
       });
       return Buffer.from(response.data, "binary").toString("base64");
     } catch (error) {
-      console.error(`❌ Gagal download gambar: ${url} | ${error.message}`);
+      console.error(`Gagal download gambar: ${url} | ${error.message}`);
       return null;
     }
   }

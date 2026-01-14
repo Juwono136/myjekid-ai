@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { updatePassword, reset, logout } from "../../features/authSlice";
-import { FiLock, FiKey, FiAlertCircle, FiEye, FiEyeOff } from "react-icons/fi"; // Tambah Icon Eye
+import { FiLock, FiKey, FiAlertCircle, FiEye, FiEyeOff } from "react-icons/fi";
 import toast from "react-hot-toast";
-import ConfirmationModal from "../ConfirmationModal"; // Import Modal
+import ConfirmationModal from "../ConfirmationModal";
 
 const PasswordForm = () => {
   const dispatch = useDispatch();
@@ -15,7 +15,6 @@ const PasswordForm = () => {
     confirmPassword: "",
   });
 
-  // State Visibility untuk Eye Icon (3 field)
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -24,7 +23,6 @@ const PasswordForm = () => {
 
   // Handle Sukses Ganti Password
   useEffect(() => {
-    // Cek flag success dari Redux
     if (success) {
       toast.success("Password berhasil diubah! Login ulang dalam 2 detik...", { duration: 3000 });
       setPassData({ currentPassword: "", newPassword: "", confirmPassword: "" });
@@ -52,7 +50,6 @@ const PasswordForm = () => {
 
   const handleInitialSubmit = (e) => {
     e.preventDefault();
-    // Validasi Frontend
     if (!passData.currentPassword || !passData.newPassword) {
       toast.error("Mohon lengkapi semua kolom");
       return;
@@ -73,7 +70,6 @@ const PasswordForm = () => {
     setIsModalOpen(false);
   };
 
-  // Helper Render Input dengan Eye Icon
   const renderPasswordInput = (label, name, value, isVisible, setVisible, placeholder) => (
     <div>
       <label className="block text-xs font-semibold text-gray-600 uppercase mb-2">{label}</label>

@@ -191,7 +191,7 @@ export const updateAdmin = async (req, res, next) => {
 
     res.status(200).json({
       status: "success",
-      message: "User berhasil diperbarui",
+      message: "User berhasil di update",
     });
   } catch (error) {
     next(error);

@@ -43,7 +43,7 @@ export const loginAdmin = async (req, res, next) => {
 
     // Cek Status Aktif
     if (!admin.is_active) {
-      return next(new AppError("Akun Anda telah dinonaktifkan. Hubungi Super Admin.", 403));
+      return next(new AppError("Akun Anda telah dinonaktifkan. Hubungi Super Admin segera!", 403));
     }
 
     // Update Last Login
@@ -125,7 +125,7 @@ export const updateProfile = async (req, res, next) => {
 
     res.status(200).json({
       status: "success",
-      message: "Profil berhasil diperbarui.",
+      message: "Profil berhasil di update.",
       data: {
         id: admin.id,
         name: admin.full_name,

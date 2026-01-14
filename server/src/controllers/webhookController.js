@@ -58,13 +58,13 @@ export const handleIncomingMessage = async (req, res) => {
     const allowedTypes = ["chat", "location", "image"];
 
     if (!allowedTypes.includes(messageType)) {
-      console.log(`⚠️ Ignored unsupported message type: ${messageType}`);
+      console.log(`Ignored unsupported message type: ${messageType}`);
       return res
         .status(200)
         .json(
           createN8nResponse(
             payload.from,
-            "🙏 Maaf, bot saat ini hanya menerima Pesan Teks, Lokasi, dan Foto."
+            "🙏 Maaf, saya saat ini hanya menerima Pesan Teks, Lokasi, dan Foto yang berhubungan dengan order MyJek."
           )
         );
     }
@@ -144,13 +144,14 @@ export const handleIncomingMessage = async (req, res) => {
         const cleanPhone = sanitizePhoneNumber(inputPhone);
         if (!cleanPhone)
           return res.json(
-            createN8nResponse(rawSenderId, "⚠️ Format salah. Gunakan: #LOGIN <Nomor HP>")
+            createN8nResponse(
+              rawSenderId,
+              "Maaf kak, Format Login salah. Silahkan gunakan/ketik: #LOGIN <Nomor HP> (Contoh: #LOGIN 08912345678)"
+            )
           );
         const courierCandidate = await Courier.findOne({ where: { phone: cleanPhone } });
         if (!courierCandidate)
-          return res.json(
-            createN8nResponse(rawSenderId, `❌ Nomor ${inputPhone} tidak terdaftar.`)
-          );
+          return res.json(createN8nResponse(rawSenderId, `Nomor ${inputPhone} tidak terdaftar.`));
 
         await courierCandidate.update({ device_id: rawSenderId, status: "IDLE", is_active: true });
         await redisClient.sAdd("online_couriers", String(courierCandidate.id));
@@ -159,7 +160,7 @@ export const handleIncomingMessage = async (req, res) => {
         return res.json(
           createN8nResponse(
             rawSenderId,
-            `✅ LOGIN BERHASIL!\nHalo ${courierCandidate.name}, akun aktif.`
+            `✅ LOGIN BERHASIL!\nHalo ${courierCandidate.name}, akun kamu sudah aktif nih. Silahkan ditunggu ordernya masuk yah 😃🙏`
           )
         );
       }
@@ -213,11 +214,14 @@ export const handleIncomingMessage = async (req, res) => {
           await User.create({ name: senderName, phone: phoneInput, device_id: rawSenderId });
           n8nResponse = createN8nResponse(
             rawSenderId,
-            `✅ REGISTRASI BERHASIL!\nSalam kenal Kak ${senderName}.`
+            `✅ REGISTRASI BERHASIL!\nSalam kenal Kak ${senderName}. Selamat datang di MyJekID - Aplikasi pesan antar melalui chat WA, Mau order atau pesan apa hari ini kak? 😃🙏`
           );
         } else {
           await existingUser.update({ device_id: rawSenderId });
-          n8nResponse = createN8nResponse(rawSenderId, `✅ Akun terhubung kembali.`);
+          n8nResponse = createN8nResponse(
+            rawSenderId,
+            `✅ Akun terhubung kembali. Mau order apa hari ini nih kak.. 😃🙏`
+          );
         }
       } else {
         if (existingUser) {
@@ -314,7 +318,7 @@ export const handleIncomingMessage = async (req, res) => {
           // User Belum Terdaftar
           n8nResponse = createN8nResponse(
             rawSenderId,
-            `👋 Halo Kak! Mohon verifikasi nomor HP dulu yah (Contoh: 08123456789).`
+            `👋 Halo Kak! Mohon verifikasi nomor HP dulu yah sebelum lanjut order. Ketik: <No_HP> (Contoh: 08123456789).`
           );
         }
       }

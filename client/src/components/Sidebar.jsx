@@ -37,10 +37,8 @@ const Sidebar = ({ closeDrawer }) => {
     { name: "Pengaturan", path: "/dashboard/settings", icon: <FiSettings size={20} /> },
   ];
 
-  // Insert User Management Menu untuk Super Admin
   const finalMenus = [...menus];
   if (user?.role === "SUPER_ADMIN") {
-    // Remove '|| true' later in production
     finalMenus.splice(5, 0, {
       name: "User Management",
       path: "/dashboard/users",
@@ -78,7 +76,6 @@ const Sidebar = ({ closeDrawer }) => {
                   to={menu.path}
                   end={menu.exact}
                   onClick={closeDrawer}
-                  // PERBAIKAN CLASSNAME UTAMA:
                   className={({ isActive }) =>
                     `flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 font-medium text-sm ${
                       isActive
@@ -87,10 +84,8 @@ const Sidebar = ({ closeDrawer }) => {
                     }`
                   }
                 >
-                  {/* PERBAIKAN: Gunakan Render Prop Function untuk Children agar aman */}
                   {({ isActive }) => (
                     <>
-                      {/* Icon Color Logic dipindah ke sini dengan string murni */}
                       <span className={isActive ? "text-white" : "text-gray-400"}>{menu.icon}</span>
                       <span>{menu.name}</span>
                     </>

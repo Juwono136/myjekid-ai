@@ -3,11 +3,9 @@ import { useDispatch, useSelector } from "react-redux";
 import toast from "react-hot-toast";
 import { io } from "socket.io-client";
 
-// Components
 import ChatSidebar from "../components/intervention/ChatSidebar";
 import ChatWindow from "../components/intervention/ChatWindow";
 
-// Actions & Hooks
 import {
   fetchSessions,
   fetchChatHistory,
@@ -31,33 +29,31 @@ const InterventionPage = () => {
   const [searchKeyword, setSearchKeyword] = useState("");
   const debouncedSearch = useDebounce(searchKeyword, 500);
 
-  // --- 1. SETUP SOCKET.IO (REAL-TIME) ---
+  // SETUP SOCKET.IO (REAL-TIME)
   useEffect(() => {
     // Inisialisasi Socket
-    // Catatan: io() tanpa argumen URL akan otomatis menggunakan origin browser
-    // Karena kita sudah setup Proxy di Vite, request ke /socket.io akan diteruskan ke backend port 5000
     socketRef.current = io({
       path: "/socket.io",
-      transports: ["polling", "websocket"], // Strategi koneksi paling stabil
+      transports: ["polling", "websocket"],
     });
 
     // Event: Terhubung
     socketRef.current.on("connect", () => {
-      console.log("✅ Socket Connected! ID:", socketRef.current.id);
+      // console.log("✅ Socket Connected! ID:", socketRef.current.id);
     });
 
     // Event: Pesan Masuk (Intervention Message)
     socketRef.current.on("intervention-message", (newMessage) => {
-      console.log("📩 New Realtime Message:", newMessage);
+      // console.log("New Realtime Message:", newMessage);
 
       // Update Redux
       dispatch(addRealtimeMessage(newMessage));
 
-      // Fitur Tambahan: Notifikasi Suara & Toast
+      // Notifikasi Suara & Toast
       const isFromUser = newMessage.sender === "USER";
       const isChatOpen = activeSession?.phone === newMessage.phone;
 
-      // Jika pesan dari user dan chat-nya SEDANG TIDAK DIBUKA, beri notif heboh
+      // Jika pesan dari user dan chat-nya SEDANG TIDAK DIBUKA, beri notif suara
       if (isFromUser && !isChatOpen) {
         // Play Sound (Pastikan file ada di folder public/assets/notification.mp3)
         // const audio = new Audio("/assets/notification.mp3");
@@ -71,19 +67,17 @@ const InterventionPage = () => {
       }
     });
 
-    // Cleanup saat component di-unmount
+    // Cleanup
     return () => {
       if (socketRef.current) socketRef.current.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch, activeSession]);
 
-  // --- 2. FETCH DATA AWAL ---
   useEffect(() => {
     dispatch(fetchSessions(debouncedSearch));
   }, [dispatch, debouncedSearch]);
 
-  // --- HANDLERS (Sama seperti sebelumnya) ---
   const handleSelectSession = (session) => {
     dispatch(setActiveSession(session));
     dispatch(fetchChatHistory(session.phone));
@@ -95,8 +89,6 @@ const InterventionPage = () => {
     try {
       // Kirim ke API
       await dispatch(sendMessage({ phone: activeSession.phone, message: text })).unwrap();
-      // NOTE: Kita TIDAK PERLU fetchChatHistory manual lagi di sini
-      // Karena Backend Task #2 sudah akan meng-emit pesan yang kita kirim balik ke socket kita
     } catch (error) {
       toast.error(`Gagal kirim pesan: ${error}`);
     }
@@ -105,15 +97,14 @@ const InterventionPage = () => {
   const handleResolve = async (phone) => {
     try {
       await dispatch(resolveSession(phone)).unwrap();
-      toast.success("Sesi selesai. Kembali ke Bot.");
-      // Mode berubah, sidebar akan otomatis update via socket message berikutnya atau manual fetch
+      toast.success("Sesi selesai. Kembali ke mode Bot.");
+
       dispatch(fetchSessions(debouncedSearch));
     } catch (error) {
       toast.error("Gagal menyelesaikan sesi.");
     }
   };
 
-  // --- LAYOUT FIXES ---
   return (
     <div className="flex flex-row h-[calc(100vh-120px)] w-full shadow-lg rounded-md bg-gray-100 overflow-hidden">
       {/* Sidebar Wrapper */}

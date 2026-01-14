@@ -1,9 +1,8 @@
-import React, { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { fetchCouriers } from "../features/courierSlice";
 import { socket } from "../services/socketClient";
 
-// --- COMPONENTS ---
 import CourierMap from "../components/map/CourierMap";
 import CourierListOverlay from "../components/map/CourierListOverlay";
 import PageHeader from "../components/common/PageHeader";
@@ -21,7 +20,7 @@ const LiveMap = () => {
   const debouncedSearch = useDebounce(searchTerm, 500);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Helper: Normalisasi Data
+  // Normalisasi Data
   const normalizeCourierData = (data) => {
     return data.map((c) => ({
       ...c,
@@ -90,7 +89,6 @@ const LiveMap = () => {
     };
   }, [dispatch]);
 
-  // --- FILTERING LOGIC DIPERBAIKI ---
   const filteredCouriers = useMemo(() => {
     // JANGAN filter berdasarkan lat/lng di sini agar tetap muncul di list
     let result = allMapData;

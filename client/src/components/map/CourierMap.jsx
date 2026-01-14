@@ -4,14 +4,13 @@ import "leaflet/dist/leaflet.css";
 import { createCustomIcon } from "../../utils/MapIcons";
 import toast from "react-hot-toast";
 
-// Komponen kecil untuk mengupdate view peta saat kurir dipilih
 const MapUpdater = ({ center, zoom }) => {
   const map = useMap();
   useEffect(() => {
     if (center && center[0] != null && center[1] != null) {
       map.flyTo(center, zoom, {
         animate: true,
-        duration: 1.5, // Efek terbang yang halus
+        duration: 1.5,
       });
     } else {
       toast.error("Koordinat tidak valid atau kurir baru pertama kali ditambahkan.");
@@ -36,7 +35,7 @@ const CourierMap = ({ couriers, selectedCourier, onMarkerClick }) => {
         zoom={15}
         scrollWheelZoom={true}
         className="h-full w-full"
-        zoomControl={false} // Kita bisa buat custom zoom control nanti jika mau
+        zoomControl={false} // custom zoom control
       >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'

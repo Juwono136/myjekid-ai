@@ -38,8 +38,13 @@ class LMStudioAdapter {
       const rawContent = response.data.choices[0].message.content;
       return this.cleanAndParseJson(rawContent);
     } catch (error) {
-      console.error("❌ LMStudio Error:", error.response?.data || error.message);
-      return { intent: "CHITCHAT", reply: "Maaf, otak AI lokal sedang gangguan.", data: {} };
+      console.error("LMStudio Error:", error.response?.data || error.message);
+      return {
+        intent: "CHITCHAT",
+        reply:
+          "Maaf, sepertinya sistem aplikasi sedang mengalami gangguan. Mohon coba beberapa saat lagi 🙏",
+        data: {},
+      };
     }
   }
 
@@ -70,7 +75,7 @@ class LMStudioAdapter {
 
       return response.data.choices[0].message.content;
     } catch (error) {
-      console.error("❌ LMStudio Vision Error:", error.message);
+      console.error("LMStudio Vision Error:", error.message);
       return "0";
     }
   }

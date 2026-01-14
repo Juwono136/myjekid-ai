@@ -16,7 +16,7 @@ import { IoPieChartOutline } from "react-icons/io5";
 import { format, parseISO } from "date-fns";
 import { id } from "date-fns/locale";
 import { dashboardService } from "../../services/dashboardService";
-import Loader from "../Loader"; // Import Loader Anda
+import Loader from "../Loader";
 
 // --- UTILS ---
 const COLORS = {
@@ -155,7 +155,7 @@ const RevenueChartWidget = () => {
 
 // --- KOMPONEN CHART DISTRIBUSI (WIDGET 2) ---
 const DistributionChartWidget = () => {
-  const [range, setRange] = useState("7days"); // Filter Independen
+  const [range, setRange] = useState("7days");
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -194,7 +194,7 @@ const DistributionChartWidget = () => {
           <h3 className="font-bold text-gray-800 text-lg">Distribusi Order</h3>
           <p className="text-xs text-gray-500">Status pesanan/order</p>
         </div>
-        {/* Filter Independen untuk Donut */}
+        {/* Filter Independen untuk Pie Chart */}
         <div className="flex bg-gray-50 p-1 rounded-lg border border-gray-100 self-start">
           {[
             { l: "7H", v: "7days" },
@@ -272,7 +272,7 @@ const DistributionChartWidget = () => {
   );
 };
 
-// --- GABUNGAN UTAMA ---
+// MAIN COMPONENT
 const AnalyticsCharts = () => {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">

@@ -1,6 +1,5 @@
 import { FiAlertTriangle, FiCheckCircle } from "react-icons/fi";
 
-// Terima prop 'targetMode' untuk menentukan teks yang ditampilkan
 const ModeToggleModal = ({ isOpen, onClose, onConfirm, targetMode }) => {
   if (!isOpen) return null;
 

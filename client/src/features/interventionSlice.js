@@ -1,14 +1,12 @@
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import interventionService from "../services/interventionService";
 
-// --- THUNKS ---
-
 export const fetchSessions = createAsyncThunk(
   "intervention/fetchSessions",
   async (search, thunkAPI) => {
     try {
       const response = await interventionService.getSessions(search);
-      return response.data; // Array sessions
+      return response.data;
     } catch (error) {
       const message = error.response?.data?.message || error.message;
       return thunkAPI.rejectWithValue(message);
@@ -21,7 +19,7 @@ export const fetchChatHistory = createAsyncThunk(
   async (phone, thunkAPI) => {
     try {
       const response = await interventionService.getChatHistory(phone);
-      return response.data; // Array messages
+      return response.data;
     } catch (error) {
       const message = error.response?.data?.message || error.message;
       return thunkAPI.rejectWithValue(message);
@@ -46,7 +44,7 @@ export const resolveSession = createAsyncThunk(
   async (phone, thunkAPI) => {
     try {
       await interventionService.resolveSession(phone);
-      return phone; // Return phone untuk update state lokal
+      return phone;
     } catch (error) {
       const message = error.response?.data?.message || error.message;
       return thunkAPI.rejectWithValue(message);
@@ -58,8 +56,6 @@ export const toggleSessionMode = createAsyncThunk(
   "intervention/toggleMode",
   async ({ phone, mode }, thunkAPI) => {
     try {
-      // Panggil endpoint baru di backend
-      // Pastikan di interventionService.js sudah ada fungsi ini (lihat langkah 2 di bawah)
       const response = await interventionService.toggleMode(phone, mode);
       return { phone, mode, data: response.data };
     } catch (error) {
@@ -67,8 +63,6 @@ export const toggleSessionMode = createAsyncThunk(
     }
   }
 );
-
-// --- SLICE ---
 
 const initialState = {
   sessions: [],
@@ -85,19 +79,15 @@ const interventionSlice = createSlice({
   reducers: {
     setActiveSession: (state, action) => {
       state.activeSession = action.payload;
-      // Cari di list dan nol-kan badge
       const session = state.sessions.find((s) => s.phone === action.payload.phone);
       if (session) session.unreadCount = 0;
     },
-
-    // --- [NEW] ACTION UNTUK SOCKET REALTIME ---
     addRealtimeMessage: (state, action) => {
       const newMessage = action.payload;
 
-      // 1. Apakah Chat Window untuk user ini sedang terbuka?
+      // Apakah Chat Window untuk user ini sedang terbuka?
       const isChatActive = state.activeSession && state.activeSession.phone === newMessage.phone;
 
-      // UPDATE ACTIVE SESSION MESSAGES
       if (isChatActive) {
         state.messages.push(newMessage);
         // Jika mode berubah (misal dari BOT -> HUMAN), update state
@@ -113,7 +103,6 @@ const interventionSlice = createSlice({
         session.last_interaction = newMessage.timestamp;
         if (newMessage.mode) session.mode = newMessage.mode;
 
-        // [FIX LOGIC BADGE]
         // Jika pesan dari USER dan chat SEDANG TIDAK AKTIF (User lain atau tertutup)
         if (newMessage.sender === "USER" && !isChatActive) {
           // Force convert to number agar aman
@@ -138,15 +127,12 @@ const interventionSlice = createSlice({
         });
       }
     },
-    // ------------------------------------------
   },
   extraReducers: (builder) => {
     builder
       // Fetch Sessions
       .addCase(fetchSessions.fulfilled, (state, action) => {
         state.isLoadingSessions = false;
-        // Saat fetch ulang, pertahankan unreadCount lokal jika memungkinkan,
-        // atau reset dari server. Di sini kita replace total.
         state.sessions = action.payload.map((s) => ({
           ...s,
           unreadCount: 0, // Default 0 karena backend belum support simpan unread status
@@ -160,7 +146,6 @@ const interventionSlice = createSlice({
         state.error = action.payload;
       })
 
-      // Fetch History
       .addCase(fetchChatHistory.pending, (state) => {
         state.isLoadingHistory = true;
         state.messages = []; // Reset pesan lama saat loading baru
@@ -174,7 +159,6 @@ const interventionSlice = createSlice({
         state.error = action.payload;
       })
 
-      // Send Message (Hanya handling loading state, pesan masuk via Socket)
       .addCase(sendMessage.pending, (state) => {
         state.isSending = true;
       })

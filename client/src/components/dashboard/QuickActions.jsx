@@ -37,7 +37,7 @@ const QuickActions = () => {
           icon={SiN8N}
           colorClass="text-pink-600"
           bgClass="bg-pink-50"
-          onClick={() => window.open("https://myjek-n8n.portproject.my.id/", "_blank")}
+          onClick={() => window.open("https://myjek-n8n.mmsdashboard.dev", "_blank")}
         />
 
         <ActionBtn
@@ -46,7 +46,7 @@ const QuickActions = () => {
           icon={FiDatabase}
           colorClass="text-red-500"
           bgClass="bg-red-50"
-          onClick={() => window.open("https://myjek-storage.portproject.my.id/", "_blank")}
+          onClick={() => window.open("https://storage.mmsdashboard.dev", "_blank")}
         />
 
         <ActionBtn
@@ -55,7 +55,7 @@ const QuickActions = () => {
           icon={FiMessageCircle}
           colorClass="text-green-600"
           bgClass="bg-green-50"
-          onClick={() => window.open("https://myjek-waha.portproject.my.id/dashboard", "_blank")}
+          onClick={() => window.open("https://waha.mmsdashboard.dev/dashboard", "_blank")}
         />
 
         <ActionBtn

@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { fetchDashboardData, fetchTransactions } from "../features/reportSlice";
 
-// Import Modular Components
 import ReportFilter from "../components/reports/ReportFilter";
 import SummaryCards from "../components/reports/SummaryCards";
 import RevenueChart from "../components/reports/RevenueChart";
@@ -15,7 +14,6 @@ const ReportsPage = () => {
     (state) => state.reports
   );
 
-  // Effect: Ambil data setiap kali Filter Tanggal berubah
   useEffect(() => {
     if (filters.startDate && filters.endDate) {
       dispatch(fetchDashboardData());
@@ -36,24 +34,24 @@ const ReportsPage = () => {
         description="Analisa performa bisnis dan unduh rekap transaksi"
       />
 
-      {/* 1. Filter Section */}
+      {/* Filter Section */}
       <ReportFilter />
 
       {isLoading ? (
-        // Skeleton Loading Sederhana
+        // Skeleton
         <div className="animate-pulse space-y-6">
           <div className="h-32 bg-gray-200 rounded-xl"></div>
           <div className="h-64 bg-gray-200 rounded-xl"></div>
         </div>
       ) : (
         <>
-          {/* 2. Statistik Cards */}
+          {/* Statistik Cards */}
           <SummaryCards summary={summary} />
 
-          {/* 3. Grafik Area */}
+          {/* Grafik Area */}
           <RevenueChart data={chartData} />
 
-          {/* 4. Tabel Transaksi */}
+          {/* Tabel Transaksi */}
           <TransactionTable
             transactions={transactions.items}
             page={transactions.currentPage}

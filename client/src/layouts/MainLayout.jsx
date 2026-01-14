@@ -15,7 +15,7 @@ const MainLayout = () => {
     <div className="drawer lg:drawer-open bg-gray-50 min-h-screen">
       <input id="my-drawer-2" type="checkbox" className="drawer-toggle" />
 
-      {/* AREA KONTEN UTAMA */}
+      {/* KONTEN UTAMA */}
       <div className="drawer-content flex flex-col">
         {/* Navbar nempel di atas konten */}
         <Navbar />
@@ -26,7 +26,7 @@ const MainLayout = () => {
         </main>
       </div>
 
-      {/* AREA SIDEBAR */}
+      {/* SIDEBAR */}
       <div className="drawer-side z-40">
         <label htmlFor="my-drawer-2" aria-label="close sidebar" className="drawer-overlay"></label>
         {/* Kirim fungsi closeDrawer kosong agar tidak error prop */}

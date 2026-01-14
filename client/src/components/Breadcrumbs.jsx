@@ -21,7 +21,7 @@ const Breadcrumbs = () => {
   return (
     <div className="text-sm breadcrumbs text-gray-500 p-0">
       <ul>
-        {/* LEVEL 1: HOME */}
+        {/* HOME */}
         <li>
           <Link
             to="/dashboard"
@@ -33,7 +33,6 @@ const Breadcrumbs = () => {
           </Link>
         </li>
 
-        {/* LEVEL SELANJUTNYA (DINAMIS) */}
         {pathnames.map((value, index) => {
           // Jangan render 'dashboard' lagi karena sudah diwakili icon Home di atas
           if (value === "dashboard") return null;

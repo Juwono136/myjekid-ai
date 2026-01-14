@@ -23,12 +23,12 @@ const BUCKET_NAME = process.env.S3_BUCKET_NAME || "myjek-receipts";
       console.log(`✅ Bucket '${BUCKET_NAME}' berhasil dibuat.`);
     }
   } catch (e) {
-    console.log("⚠️ MinIO Init Warning: " + e.message);
+    console.log("MinIO Init Warning: " + e.message);
   }
 })();
 
 export const storageService = {
-  // 1. DOWNLOAD DARI URL (WAHA) -> UPLOAD KE MINIO
+  // DOWNLOAD DARI URL (WAHA) -> UPLOAD KE MINIO
   // Digunakan jika gambar dikirim berupa Link (http://...)
   uploadFileFromUrl: async (sourceUrl, targetFilename) => {
     try {
@@ -60,15 +60,14 @@ export const storageService = {
       console.log(`✅ Sukses upload URL ke MinIO: ${targetFilename}`);
       return targetFilename;
     } catch (error) {
-      // Tampilkan error lebih detail
       const status = error.response ? error.response.status : "Unknown";
       const errMsg = error.message;
-      console.error(`❌ Gagal Upload URL ke MinIO (Status: ${status}): ${errMsg}`);
+      console.error(`Gagal Upload URL ke MinIO (Status: ${status}): ${errMsg}`);
       return null;
     }
   },
 
-  // 2. [BARU] UPLOAD DARI BASE64
+  // UPLOAD DARI BASE64
   // Digunakan jika gambar dikirim berupa kode teks panjang (Raw Image Data)
   uploadBase64: async (base64String, targetFilename) => {
     try {
@@ -89,7 +88,7 @@ export const storageService = {
     }
   },
 
-  // 3. AMBIL BUFFER DARI MINIO
+  // AMBIL BUFFER DARI MINIO
   getFileBuffer: async (fileName) => {
     try {
       const dataStream = await minioClient.getObject(BUCKET_NAME, fileName);
@@ -132,7 +131,7 @@ export const storageService = {
     }
   },
 
-  // 4. GENERATE PRESIGNED URL (Opsional)
+  // GENERATE PRESIGNED URL (Opsional)
   getPresignedUrl: async (filename) => {
     try {
       return await minioClient.presignedGetObject(BUCKET_NAME, filename, 3600);

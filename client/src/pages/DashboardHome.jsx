@@ -1,20 +1,19 @@
 import { useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
+import { FiRefreshCw, FiCalendar } from "react-icons/fi";
+import { format } from "date-fns";
+import { id } from "date-fns/locale";
 import { getDashboardStats } from "../features/dashboardSlice";
+
 import DashboardSkeleton from "../components/DashboardSkeleton";
 import StatsGrid from "../components/dashboard/StatsGrid";
 import AnalyticsCharts from "../components/dashboard/AnalyticsCharts";
 import RecentTransactions from "../components/dashboard/RecentTransactions";
 import QuickActions from "../components/dashboard/QuickActions";
-import { FiRefreshCw, FiCalendar } from "react-icons/fi";
-import { format } from "date-fns";
-import { id } from "date-fns/locale";
 
 const DashboardHome = () => {
   const dispatch = useDispatch();
 
-  // Pastikan reducer anda mengembalikan structure data yang sesuai dengan Backend baru
-  // charts: { revenue: [], distribution: [] }
   const { stats, charts, recentOrders, isLoading, isError, message } = useSelector(
     (state) => state.dashboard
   );
@@ -59,8 +58,6 @@ const DashboardHome = () => {
           <button
             onClick={() => {
               dispatch(getDashboardStats());
-              // Chart akan refresh otomatis jika kita mau tambahkan logic refresh signal,
-              // tapi untuk sekarang tombol ini khusus refresh Stats Card
             }}
             className="btn btn-ghost btn-sm gap-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg"
           >
@@ -71,7 +68,6 @@ const DashboardHome = () => {
 
       <StatsGrid stats={stats} />
 
-      {/* Chart Component sudah mandiri, tidak butuh props filter */}
       <AnalyticsCharts />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">

@@ -3,7 +3,7 @@ import { useDispatch, useSelector } from "react-redux";
 import { updateProfile, reset } from "../../features/authSlice";
 import { FiUser, FiSmartphone, FiMail, FiSave } from "react-icons/fi";
 import toast from "react-hot-toast";
-import ConfirmationModal from "../ConfirmationModal"; // Import Modal Anda
+import ConfirmationModal from "../ConfirmationModal";
 
 const ProfileForm = () => {
   const dispatch = useDispatch();
@@ -15,9 +15,9 @@ const ProfileForm = () => {
     email: "",
   });
 
-  const [isModalOpen, setIsModalOpen] = useState(false); // State Modal
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // Helper: Format Role (SUPER_ADMIN -> Super Admin)
+  // Format Role (SUPER_ADMIN -> Super Admin)
   const formatRole = (role) => {
     if (!role) return "USER";
     return role
@@ -27,7 +27,6 @@ const ProfileForm = () => {
       .join(" ");
   };
 
-  // Sinkronisasi Form dengan Data Redux (Agar UI update otomatis setelah sukses)
   useEffect(() => {
     if (user) {
       setFormData({
@@ -80,7 +79,7 @@ const ProfileForm = () => {
             </div>
             <div>
               <h3 className="font-bold text-gray-800 text-lg">{formData.full_name || "Admin"}</h3>
-              {/* FIX: Tampilan Role Clean */}
+
               <p className="text-blue-600 text-xs uppercase tracking-wider font-bold bg-blue-50 px-3 py-1 rounded-full inline-block mt-1">
                 {formatRole(user?.role)}
               </p>

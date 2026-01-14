@@ -4,7 +4,6 @@ import { storageService } from "./storageService.js";
 
 dotenv.config();
 
-// KONFIGURASI PENTING
 // WAHA_URL harus mengarah ke container WAHA (misal: http://waha:3000 atau http://localhost:7575 jika host mode)
 const WAHA_URL = process.env.WAHA_API_URL || "http://localhost:7575";
 const WAHA_SESSION = process.env.WAHA_SESSION || "default";
@@ -60,7 +59,7 @@ export const messageService = {
         base64Content = imageSource.split(",")[1];
       }
 
-      // Input adalah Nama File MinIO (download dulu)
+      // Input berupa Nama File MinIO (download dulu)
       else if (imageSource && !imageSource.startsWith("http")) {
         console.log(`☁️ Downloading buffer from MinIO: ${imageSource}`);
         const fileBuffer = await storageService.getFileBuffer(imageSource);
@@ -97,12 +96,12 @@ export const messageService = {
       return true;
     } catch (error) {
       console.error(
-        `❌ Gagal Kirim Gambar ke ${to}:`,
+        `Gagal Kirim Gambar ke ${to}:`,
         error.response ? error.response.data : error.message
       );
 
       // Fallback
-      await this.sendMessage(to, `${caption}\n\n⚠️ (Gambar gagal dimuat, mohon maaf).`);
+      await this.sendMessage(to, `${caption}\n\n_(Gambar gagal dimuat, mohon maaf)_.`);
       return false;
     }
   },

@@ -1,8 +1,8 @@
 import axios from "axios";
-import { ChatSession, User, TrainingData } from "../models/index.js";
-import logger from "../utils/logger.js";
-import dotenv from "dotenv";
 import { Op } from "sequelize";
+import dotenv from "dotenv";
+import logger from "../utils/logger.js";
+import { ChatSession, User, TrainingData } from "../models/index.js";
 import { createSystemNotification } from "./notificationController.js";
 
 dotenv.config();
@@ -98,8 +98,7 @@ export const toggleSessionMode = async (req, res, next) => {
       req.io.emit("intervention-message", {
         phone: phone,
         sender: "SYSTEM",
-        text:
-          mode === "HUMAN" ? "🔒 Admin mengambil alih (Mode Human)" : "🤖 Bot diaktifkan kembali",
+        text: mode === "HUMAN" ? "Admin mengambil alih (Mode Human)" : "Bot diaktifkan kembali",
         timestamp: new Date(),
         mode: mode,
         is_paused_until: updateData.is_paused_until,

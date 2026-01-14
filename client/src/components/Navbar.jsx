@@ -2,14 +2,11 @@ import { useState, useEffect } from "react";
 import { useSelector, useDispatch } from "react-redux";
 import { Link } from "react-router-dom";
 import { FiMenu, FiSettings, FiLogOut } from "react-icons/fi";
-import { io } from "socket.io-client"; // Socket
+import { io } from "socket.io-client";
 
-// Import Actions
 import { logout } from "../features/authSlice";
-import { fetchNotifications, addRealtimeNotification } from "../features/notificationSlice"; // Slice baru
-// Import Component Notification Menu
+import { fetchNotifications, addRealtimeNotification } from "../features/notificationSlice";
 import NotificationMenu from "./notification/NotificationMenu";
-
 import Breadcrumbs from "./Breadcrumbs";
 import ConfirmationModal from "./ConfirmationModal";
 
@@ -18,12 +15,12 @@ const Navbar = () => {
   const dispatch = useDispatch();
   const [isLogoutModalOpen, setLogoutModalOpen] = useState(false);
 
-  // --- INIT DATA & SOCKET ---
+  // INIT DATA & SOCKET
   useEffect(() => {
-    // 1. Load Data Awal
+    // Load Data Awal
     dispatch(fetchNotifications({ page: 1, limit: 10, isLoadMore: false }));
 
-    // 2. Setup Socket Listener
+    // Setup Socket Listener
     const socket = io({ path: "/socket.io" }); // Sesuaikan path socket backend
     socket.on("new-notification", (notif) => {
       dispatch(addRealtimeNotification(notif));
@@ -61,13 +58,11 @@ const Navbar = () => {
 
         {/* BAGIAN KANAN */}
         <div className="flex-none flex items-center gap-2 md:gap-4">
-          {/* --- GANTI BAGIAN INI: KOMPONEN NOTIFIKASI BARU --- */}
           <NotificationMenu />
-          {/* -------------------------------------------------- */}
 
           <div className="h-8 w-px bg-gray-200 mx-1 hidden md:block"></div>
 
-          {/* PROFILE DROPDOWN (Sama) */}
+          {/* PROFILE DROPDOWN */}
           <div className="dropdown dropdown-end">
             <div
               tabIndex={0}
@@ -78,12 +73,10 @@ const Navbar = () => {
                 <span className="text-sm font-bold">{getInitials(user?.name)}</span>
               </div>
             </div>
-            {/* ... isi dropdown profile ... */}
             <ul
               tabIndex={0}
               className="mt-4 z-1 p-0 shadow-xl border border-gray-100 menu menu-sm dropdown-content bg-white rounded-2xl w-64 overflow-hidden animate-fade-in-up"
             >
-              {/* ... (kode profile menu Anda yang lama paste disini) ... */}
               <li className="menu-title bg-gray-50 px-5 py-4 border-b border-gray-100">
                 <div className="flex flex-col gap-1">
                   <span className="text-gray-800 font-bold text-sm truncate">

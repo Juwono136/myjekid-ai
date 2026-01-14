@@ -1,4 +1,3 @@
-import React from "react";
 import { format } from "date-fns";
 import { id } from "date-fns/locale";
 
@@ -39,8 +38,6 @@ const RecentTransactions = ({ orders }) => {
     );
   };
 
-  // --- KUNCI LAYOUT SEJAJAR ---
-  // Container: h-full flex flex-col
   return (
     <div className="card bg-white border border-gray-100 shadow-sm rounded-2xl flex flex-col h-full overflow-hidden">
       {/* Header Card */}
@@ -54,7 +51,7 @@ const RecentTransactions = ({ orders }) => {
         </a>
       </div>
 
-      {/* Table Container: flex-1 (ambil sisa ruang) + overflow auto */}
+      {/* Table Container */}
       <div className="flex-1 overflow-auto relative">
         <table className="table w-full border-collapse">
           {/* Sticky Header */}

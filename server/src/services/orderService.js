@@ -1,9 +1,7 @@
-import { Order, Courier, User, sequelize } from "../models/index.js"; // Pastikan import User
+import { Order, Courier, User, sequelize } from "../models/index.js";
 
 class OrderService {
-  /**
-   * Membuat Order Baru dari Data Ekstraksi AI
-   */
+  // Membuat Order Baru dari Data Ekstraksi AI
   async createFromAI(userPhone, aiData) {
     try {
       const orderId = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -27,11 +25,10 @@ class OrderService {
     }
   }
 
-  // --- [UPDATE] KURIR MENGAMBIL ORDER ---
+  // KURIR MENGAMBIL ORDER
   async takeOrder(orderIdString, courierId) {
     const transaction = await sequelize.transaction();
     try {
-      // [PERBAIKAN KRUSIAL DISINI]
       // Tambahkan 'required: true' agar menjadi INNER JOIN.
       // Ini mengatasi error "FOR UPDATE cannot be applied to the nullable side"
       const order = await Order.findOne({
@@ -44,7 +41,7 @@ class OrderService {
           },
         ],
         transaction,
-        lock: transaction.LOCK.UPDATE, // Kunci baris agar tidak balapan
+        lock: transaction.LOCK.UPDATE,
       });
 
       if (!order) {
@@ -82,8 +79,8 @@ class OrderService {
       return { success: true, data: order };
     } catch (error) {
       await transaction.rollback();
-      console.error("❌ Take Order Error:", error); // Debugging
-      return { success: false, message: "Sistem sedang sibuk, coba sesaat lagi." };
+      console.error("Take Order Error:", error);
+      return { success: false, message: "Mohon maaf, sistem sedang sibuk, coba sesaat lagi." };
     }
   }
 
@@ -110,7 +107,7 @@ class OrderService {
       await order.update({ status: "BILL_SENT" }, { transaction });
 
       await transaction.commit();
-      return order; // Return order agar Flow bisa kirim pesan ke user
+      return order;
     } catch (error) {
       await transaction.rollback();
       return null;

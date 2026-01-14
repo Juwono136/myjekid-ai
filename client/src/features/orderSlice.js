@@ -4,18 +4,14 @@ import orderService from "../services/orderService";
 const initialState = {
   orders: [],
   pagination: { currentPage: 1, totalPages: 1, totalItems: 0 },
-
-  // State khusus untuk Modal Detail
   orderDetail: null,
   isDetailLoading: false,
-
-  // Global State
   isLoading: false,
   isError: false,
   message: "",
 };
 
-// 1. Fetch List Orders
+// Fetch List Orders
 export const fetchOrders = createAsyncThunk("orders/fetchAll", async (params, thunkAPI) => {
   try {
     return await orderService.getAll(params);
@@ -25,7 +21,7 @@ export const fetchOrders = createAsyncThunk("orders/fetchAll", async (params, th
   }
 });
 
-// 2. Fetch Order Detail (New)
+// Fetch Order Detail (New)
 export const fetchOrderDetail = createAsyncThunk(
   "orders/fetchDetail",
   async (orderId, thunkAPI) => {
@@ -50,7 +46,6 @@ const orderSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
-      // --- Fetch List ---
       .addCase(fetchOrders.pending, (state) => {
         state.isLoading = true;
         state.isError = false;
@@ -58,7 +53,6 @@ const orderSlice = createSlice({
       .addCase(fetchOrders.fulfilled, (state, action) => {
         state.isLoading = false;
         state.orders = action.payload.data;
-        // Backend mengirim 'meta', pastikan mappingnya sesuai
         state.pagination = action.payload.meta || action.payload.pagination;
       })
       .addCase(fetchOrders.rejected, (state, action) => {
@@ -67,7 +61,6 @@ const orderSlice = createSlice({
         state.message = action.payload;
       })
 
-      // --- Fetch Detail ---
       .addCase(fetchOrderDetail.pending, (state) => {
         state.isDetailLoading = true;
         state.isError = false;

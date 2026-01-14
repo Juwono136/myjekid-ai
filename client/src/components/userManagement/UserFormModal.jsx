@@ -72,7 +72,7 @@ const UserFormModal = ({ isOpen, onClose, mode, initialData, onSubmit }) => {
 
         {/* Body Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          {/* 1. INFORMASI DASAR (Read Only saat Edit) */}
+          {/* INFORMASI DASAR (Read Only saat Edit) */}
           <div className="space-y-3">
             <div className="form-control">
               <label className="label-text text-xs font-bold text-gray-500 uppercase mb-1">
@@ -158,7 +158,7 @@ const UserFormModal = ({ isOpen, onClose, mode, initialData, onSubmit }) => {
             <div className="divider text-xs text-gray-400">PENGATURAN AKSES (EDITABLE)</div>
           )}
 
-          {/* 2. PENGATURAN AKSES (Editable oleh Admin) */}
+          {/* PENGATURAN AKSES (Editable oleh Admin) */}
           <div className="grid grid-cols-2 gap-4">
             <div className="form-control">
               <label className="label-text text-xs font-bold text-gray-500 uppercase mb-1">

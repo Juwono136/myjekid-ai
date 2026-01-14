@@ -1,4 +1,3 @@
-import React from "react";
 import { FiAlertTriangle, FiCheckCircle, FiX } from "react-icons/fi";
 
 const ConfirmationModal = ({
@@ -57,7 +56,6 @@ const ConfirmationModal = ({
 
           <h3 className="text-xl font-bold text-gray-800 mb-2">{title}</h3>
 
-          {/* CONTENT WITH HTML SUPPORT (Untuk tag <b>) */}
           <div
             className="text-gray-500 text-sm mb-6 leading-relaxed"
             dangerouslySetInnerHTML={{ __html: message }}

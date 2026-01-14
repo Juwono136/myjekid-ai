@@ -4,7 +4,6 @@ import { fetchOrderDetail, clearOrderDetail } from "../../features/orderSlice";
 import { FiX, FiNavigation } from "react-icons/fi";
 import Loader from "../Loader";
 
-// Modular Sub-Components
 import OrderRouteInfo from "./OrderRouteInfo";
 import OrderTimeline from "./OrderTimeline";
 import OrderEvidence from "./OrderEvidence";
@@ -24,7 +23,6 @@ const OrderDetailModal = ({ isOpen, onClose, orderId }) => {
 
   if (!isOpen) return null;
 
-  // Helper Logic
   const formatRupiah = (num) =>
     new Intl.NumberFormat("id-ID", {
       style: "currency",
@@ -51,7 +49,7 @@ const OrderDetailModal = ({ isOpen, onClose, orderId }) => {
   };
 
   const imageUrl = orderDetail?.invoice_image_url
-    ? `https://minio.portproject.my.id/myjek-invoices/${orderDetail.invoice_image_url}`
+    ? `https://storage.mmsdashboard.dev/myjek-invoices/${orderDetail.invoice_image_url}`
     : null;
 
   return (
@@ -101,9 +99,9 @@ const OrderDetailModal = ({ isOpen, onClose, orderId }) => {
                   </div>
                 </div>
 
-                {/* Menampilkan Info Pelanggan & Kurir secara berdampingan */}
+                {/* Menampilkan Info Pelanggan & Kurir */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                  {/* Info Pelanggan (Kita reuse kode, atau buat komponen terpisah UserInfo juga boleh) */}
+                  {/* Info Pelanggan */}
                   <div className="p-3 bg-blue-50/50 rounded-xl border border-blue-100 flex gap-3 items-center">
                     <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-lg">
                       {orderDetail.user?.name?.charAt(0) || "U"}
@@ -117,11 +115,11 @@ const OrderDetailModal = ({ isOpen, onClose, orderId }) => {
                     </div>
                   </div>
 
-                  {/* Info Kurir (Komponen Baru) */}
+                  {/* Info Kurir */}
                   <OrderCourierInfo courier={orderDetail.courier} />
                 </div>
 
-                {/* Sub-Component: Route Info */}
+                {/* Route Info */}
                 <OrderRouteInfo order={orderDetail} />
 
                 <div className="divider my-6"></div>
@@ -180,10 +178,10 @@ const OrderDetailModal = ({ isOpen, onClose, orderId }) => {
 
               {/* --- RIGHT: EVIDENCE & HISTORY --- */}
               <div className="w-full lg:w-96 bg-gray-50/80 p-6 lg:p-8 flex flex-col h-full border-t lg:border-t-0">
-                {/* Sub-Component: Evidence & Lightbox */}
+                {/* Evidence & Lightbox */}
                 <OrderEvidence imageUrl={imageUrl} />
 
-                {/* Sub-Component: Timeline */}
+                {/* Timeline */}
                 <OrderTimeline order={orderDetail} />
               </div>
             </div>

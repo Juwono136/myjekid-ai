@@ -179,7 +179,7 @@ export const updateCourier = async (req, res, next) => {
 
     res.status(200).json({
       status: "success",
-      message: "Data kurir berhasil diperbarui.",
+      message: "Data kurir berhasil di update.",
     });
   } catch (error) {
     logger.error(`Error updateCourier: ${error.message}`);
@@ -199,7 +199,7 @@ export const deleteCourier = async (req, res, next) => {
 
     res.status(200).json({
       status: "success",
-      message: "Data kurir dihapus dari database.",
+      message: "Kurir berhasil dihapus.",
     });
   } catch (error) {
     logger.error(`Error deleteCourier: ${error.message}`);

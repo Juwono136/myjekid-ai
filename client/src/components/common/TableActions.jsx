@@ -1,4 +1,3 @@
-import React from "react";
 import { FiSearch, FiList } from "react-icons/fi";
 
 const TableActions = ({

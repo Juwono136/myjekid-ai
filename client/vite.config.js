@@ -9,18 +9,14 @@ export default defineConfig(({ mode }) => {
       proxy: {
         "/api": {
           target:
-            mode === "development"
-              ? "http://localhost:5000"
-              : "https://myjekid-api.portproject.my.id",
+            mode === "development" ? "http://localhost:5000" : "https://myjek-api.mmsdashboard.dev",
           changeOrigin: true,
           secure: mode !== "development",
           ws: true,
         },
         "/socket.io": {
           target:
-            mode === "development"
-              ? "http://localhost:5000"
-              : "https://myjekid-api.portproject.my.id",
+            mode === "development" ? "http://localhost:5000" : "https://myjek-api.mmsdashboard.dev",
           changeOrigin: true,
           secure: mode !== "development",
           ws: true, // Wajib true untuk WebSocket

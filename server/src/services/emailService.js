@@ -5,7 +5,6 @@ import logger from "../utils/logger.js";
 dotenv.config();
 
 // Konfigurasi Transporter (SMTP)
-// Disarankan menggunakan environment variables
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || "smtp.gmail.com",
   port: process.env.SMTP_PORT || 587,
@@ -20,7 +19,7 @@ export const sendEmailNotification = async (to, subject, htmlContent) => {
   try {
     // Jika kredensial belum diset, skip saja agar tidak error di development
     if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-      logger.warn("⚠️ SMTP credentials not found. Email notification skipped.");
+      logger.warn("SMTP credentials not found. Email notification skipped.");
       return;
     }
 
@@ -31,10 +30,9 @@ export const sendEmailNotification = async (to, subject, htmlContent) => {
       html: htmlContent,
     });
 
-    logger.info(`📧 Email sent: ${info.messageId}`);
+    logger.info(`Email sent: ${info.messageId}`);
     return info;
   } catch (error) {
-    logger.error(`❌ Failed to send email: ${error.message}`);
-    // Jangan throw error agar flow utama aplikasi tidak berhenti cuma gara-gara email gagal
+    logger.error(`Failed to send email: ${error.message}`);
   }
 };

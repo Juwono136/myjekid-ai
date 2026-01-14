@@ -13,21 +13,10 @@ const MessageList = ({ messages = [], session }) => {
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const hasAutoScrolledRef = useRef(false);
 
-  /**
-   * =========================================================
-   * 1. RESET FLAG SAAT SESSION BERUBAH
-   * =========================================================
-   */
   useEffect(() => {
     hasAutoScrolledRef.current = false;
   }, [session?.phone]);
 
-  /**
-   * =========================================================
-   * 2. FORCE SCROLL SETELAH HISTORY BENAR-BENAR RENDER
-   *    (INI FIX UTAMA)
-   * =========================================================
-   */
   useLayoutEffect(() => {
     if (!scrollRef.current) return;
     if (!messages.length) return;
@@ -37,11 +26,6 @@ const MessageList = ({ messages = [], session }) => {
     hasAutoScrolledRef.current = true;
   }, [messages, session?.phone]);
 
-  /**
-   * =========================================================
-   * 3. AUTO SCROLL REALTIME (HANYA JIKA USER DI BAWAH)
-   * =========================================================
-   */
   useEffect(() => {
     if (!scrollRef.current) return;
 
@@ -53,11 +37,6 @@ const MessageList = ({ messages = [], session }) => {
     }
   }, [messages]);
 
-  /**
-   * =========================================================
-   * 4. KONTROL TOMBOL SCROLL DOWN
-   * =========================================================
-   */
   const handleScroll = () => {
     if (!scrollRef.current) return;
 

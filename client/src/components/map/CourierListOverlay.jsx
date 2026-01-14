@@ -19,11 +19,10 @@ const CourierListOverlay = ({
 }) => {
   const [isExpanded, setIsExpanded] = useState(true);
 
-  // --- TOUCH / SWIPE LOGIC FOR MOBILE ---
   const [touchStart, setTouchStart] = useState(null);
   const [touchEnd, setTouchEnd] = useState(null);
 
-  const minSwipeDistance = 50; // Jarak minimal swipe untuk trigger action
+  const minSwipeDistance = 50;
 
   const onTouchStart = (e) => {
     setTouchEnd(null);
@@ -137,7 +136,7 @@ const CourierListOverlay = ({
           }`}
         >
           {couriers.length === 0 ? (
-            /* --- FIXED EMPTY STATE (DIV BASED) --- */
+            /* EMPTY STATE */
             <div className="flex flex-col items-center justify-center h-48 md:h-full text-center text-gray-400">
               <div className="bg-gray-50 w-16 h-16 rounded-full flex items-center justify-center mb-3">
                 <FiInbox size={24} />

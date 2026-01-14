@@ -4,7 +4,7 @@ import { useSelector } from "react-redux";
 const RoleBasedRoute = ({ children, allowedRoles }) => {
   const { user } = useSelector((state) => state.auth);
 
-  // 1. Jika User State Kosong (misal refresh halaman dan Redux belum siap),
+  // Jika User State Kosong (misal refresh halaman dan Redux belum siap),
   // Cek token fisik. Jika token tidak ada, ke login.
   if (!user) {
     const token = localStorage.getItem("token");
@@ -15,7 +15,7 @@ const RoleBasedRoute = ({ children, allowedRoles }) => {
     return null;
   }
 
-  // 2. Jika Role tidak sesuai
+  // Jika Role tidak sesuai
   if (!allowedRoles.includes(user.role)) {
     // Redirect ke Dashboard Home, bukan Login (karena dia sudah login, cuma salah kamar)
     return <Navigate to="/dashboard" replace />;

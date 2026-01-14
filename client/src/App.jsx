@@ -2,7 +2,6 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
 import "./App.css";
 
-// Pages & Layouts
 import Login from "./pages/Login";
 import MainLayout from "./layouts/MainLayout";
 import DashboardHome from "./pages/DashboardHome";
@@ -17,12 +16,12 @@ import ReportsPage from "./pages/ReportsPage";
 import SettingsPage from "./pages/SettingsPage";
 
 // Placeholder Pages (Untuk Menu Lain yang belum dibuat)
-const PlaceholderPage = ({ title }) => (
-  <div className="p-10 text-center bg-white rounded-2xl shadow-sm border border-gray-100 h-full">
-    <h2 className="text-2xl font-bold text-gray-400">{title}</h2>
-    <p className="text-gray-400">Fitur ini sedang dalam pengembangan.</p>
-  </div>
-);
+// const PlaceholderPage = ({ title }) => (
+//   <div className="p-10 text-center bg-white rounded-2xl shadow-sm border border-gray-100 h-full">
+//     <h2 className="text-2xl font-bold text-gray-400">{title}</h2>
+//     <p className="text-gray-400">Fitur ini sedang dalam pengembangan.</p>
+//   </div>
+// );
 
 function App() {
   return (

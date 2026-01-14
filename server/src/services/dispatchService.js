@@ -1,10 +1,10 @@
 import { Op } from "sequelize";
-import { Courier, Order, User } from "../models/index.js"; // Import User untuk ambil koordinat
+import { Courier, Order, User } from "../models/index.js";
 import { messageService } from "./messageService.js";
 import { redisClient } from "../config/redisClient.js";
 
 export const dispatchService = {
-  // 1. CARI DRIVER
+  // CARI DRIVER
   async findDriverForOrder(orderId) {
     console.log(`🔍 Dispatching Order #${orderId}...`);
 
@@ -14,18 +14,18 @@ export const dispatchService = {
     });
 
     if (!order) {
-      console.log("❌ Order tidak ditemukan saat dispatch.");
+      console.log("Order tidak ditemukan saat dispatch.");
       return;
     }
 
-    // A. Cek Redis
+    // Cek Redis
     const onlineCourierIds = await redisClient.sMembers("online_couriers");
     if (onlineCourierIds.length === 0) {
-      console.log("⚠️ TIDAK ADA KURIR ONLINE.");
+      console.log("TIDAK ADA KURIR ONLINE.");
       return;
     }
 
-    // B. Filter DB (Status IDLE)
+    // Filter DB (Status IDLE)
     const candidate = await Courier.findOne({
       where: {
         id: { [Op.in]: onlineCourierIds },
@@ -36,24 +36,23 @@ export const dispatchService = {
     });
 
     if (!candidate) {
-      console.log(`⚠️ Ada ${onlineCourierIds.length} Kurir Online, tapi SEMUA SIBUK.`);
+      console.log(`Ada ${onlineCourierIds.length} Kurir Online, tapi SEMUA SIBUK.`);
       return;
     }
 
-    // C. Tawarkan Order
+    // Tawarkan Order
     await this.offerOrderToCourier(order, candidate);
   },
 
-  // 2. KIRIM PENAWARAN (BROADCAST DENGAN MAPS)
+  // KIRIM PENAWARAN (BROADCAST DENGAN MAPS)
   async offerOrderToCourier(order, courier) {
     try {
       const items = order.items_summary || [];
       const itemsList = items.map((i) => `- ${i.item} (x${i.qty})`).join("\n");
-      const displayId = order.order_id; // Menggunakan ID Order asli
+      const displayId = order.order_id;
 
-      // --- LOGIC GENERATE MAPS LINK ---
-      // Mengambil koordinat dari User yang terhubung dengan Order ini
-      // Idealnya koordinat disimpan di tabel Order, tapi pakai User dulu oke selama belum pindah jauh
+      // GENERATE MAPS LINK
+      // Mengambil koordinat dari User yang terhubung dengan Order
       let mapsLink = "";
       if (order.user && order.user.latitude && order.user.longitude) {
         // Format Link Universal Google Maps
@@ -65,7 +64,8 @@ export const dispatchService = {
 
       const message =
         `🔔 *ORDER BARU MASUK!* 🔔\n\n` +
-        `🆔 Order ID: ${displayId}\n` +
+        `🆔 *Order ID:*\n` +
+        `${displayId}\n\n` +
         `📦 *Item:*\n${itemsList}\n\n` +
         `📍 *Ambil:* ${order.pickup_address}\n` +
         `🏁 *Antar:* ${order.delivery_address} (*Link Maps:* ${mapsLink}\n\n` +
@@ -74,10 +74,10 @@ export const dispatchService = {
 
       await messageService.sendMessage(courier.phone, message);
 
-      console.log(`📨 Offer sent to ${courier.name} with Maps Link`);
+      console.log(`Offer sent to ${courier.name} with Maps Link`);
       return true;
     } catch (error) {
-      console.error("❌ Failed to offer order:", error);
+      console.error("Failed to offer order:", error);
       return false;
     }
   },

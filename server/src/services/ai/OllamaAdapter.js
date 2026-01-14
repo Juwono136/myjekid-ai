@@ -28,7 +28,7 @@ class OllamaAdapter {
       const rawContent = response.data.message.content;
       return JSON.parse(rawContent);
     } catch (error) {
-      console.error("❌ Ollama Error:", error.message);
+      console.error("Ollama Error:", error.message);
       return { intent: "CHITCHAT", reply: "Maaf, AI Lokal timeout.", data: {} };
     }
   }

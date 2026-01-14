@@ -1,9 +1,7 @@
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import { courierService } from "../services/courierService";
 
-// --- ASYNC THUNKS ---
-
-// 1. Fetch Couriers (dengan filter & pagination)
+// Fetch Couriers (dengan filter & pagination)
 export const fetchCouriers = createAsyncThunk("courier/fetchCouriers", async (params, thunkAPI) => {
   try {
     return await courierService.getCouriers(params);
@@ -13,7 +11,7 @@ export const fetchCouriers = createAsyncThunk("courier/fetchCouriers", async (pa
   }
 });
 
-// 2. Create Courier
+// Create Courier
 export const createCourier = createAsyncThunk("courier/createCourier", async (data, thunkAPI) => {
   try {
     return await courierService.createCourier(data);
@@ -23,7 +21,7 @@ export const createCourier = createAsyncThunk("courier/createCourier", async (da
   }
 });
 
-// 3. Update Courier
+// Update Courier
 export const updateCourier = createAsyncThunk(
   "courier/updateCourier",
   async ({ id, data }, thunkAPI) => {
@@ -36,7 +34,7 @@ export const updateCourier = createAsyncThunk(
   }
 );
 
-// 4. Delete Courier
+// Delete Courier
 export const deleteCourier = createAsyncThunk("courier/deleteCourier", async (id, thunkAPI) => {
   try {
     await courierService.deleteCourier(id);
@@ -47,12 +45,11 @@ export const deleteCourier = createAsyncThunk("courier/deleteCourier", async (id
   }
 });
 
-// --- SLICE ---
 const courierSlice = createSlice({
   name: "courier",
   initialState: {
     couriers: [],
-    meta: { totalPages: 1, totalItems: 0, currentPage: 1 }, // Pagination info
+    meta: { totalPages: 1, totalItems: 0, currentPage: 1 },
     isLoading: false,
     isSuccess: false,
     isError: false,
@@ -91,8 +88,6 @@ const courierSlice = createSlice({
       .addCase(createCourier.fulfilled, (state, action) => {
         state.isLoading = false;
         state.isSuccess = true;
-        // Opsional: push ke array jika tidak refresh halaman,
-        // tapi biasanya kita refetch agar sort/pagination benar
       })
       .addCase(createCourier.rejected, (state, action) => {
         state.isLoading = false;
@@ -100,7 +95,6 @@ const courierSlice = createSlice({
         state.message = action.payload;
       })
 
-      // UPDATE
       .addCase(updateCourier.pending, (state) => {
         state.isLoading = true;
       })
@@ -114,7 +108,6 @@ const courierSlice = createSlice({
         state.message = action.payload;
       })
 
-      // DELETE
       .addCase(deleteCourier.fulfilled, (state, action) => {
         state.isLoading = false;
         state.isSuccess = true;
