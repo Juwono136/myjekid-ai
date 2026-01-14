@@ -4,49 +4,48 @@ class OpenAiAdapter {
   constructor(apiKey) {
     this.openai = new OpenAI({ apiKey });
     this.modelName = "gpt-4o-mini";
-    this.visionModel = "gpt-4o-mini";
   }
 
+  // TEXT CHAT GENERATION
   async generateResponse(systemPrompt, userText, context = {}) {
     try {
-      const contextString = JSON.stringify(context, null, 2);
+      // Optimasi Token: Jika history chat terlalu panjang, potong di logic flow (bukan disini).
+      const contextString = JSON.stringify(context);
 
       const messages = [
         {
           role: "system",
-          content: systemPrompt,
+          content: `${systemPrompt}\n\nIMPORTANT: You are a JSON generator. You must output VALID JSON only.`,
         },
         {
           role: "user",
-          content:
-            `CONTEXT DATA:\n${contextString}\n\n` +
-            `USER MESSAGE:\n"${userText}"\n\n` +
-            `(Respond ONLY in Valid JSON format)`,
+          content: `CONTEXT: ${contextString}\nUSER SAYS: "${userText}"\n\nRespond in JSON format: { "intent": "STRING", "reply": "STRING", "data": OBJECT }`,
         },
       ];
 
       const completion = await this.openai.chat.completions.create({
         model: this.modelName,
         messages,
-        temperature: 0.1,
+        temperature: 0.3, // Sedikit kreatif tapi tetap patuh aturan
+        response_format: { type: "json_object" },
       });
 
       const rawContent = completion.choices[0].message.content;
-      return this.cleanAndParseJson(rawContent);
+      return JSON.parse(rawContent);
     } catch (error) {
-      console.error("[OpenAI] Error:", error.message);
+      console.error("[OpenAI] Text Error:", error.message);
       return {
         intent: "CHITCHAT",
-        reply:
-          "Maaf, sepertinya sistem aplikasi sedang mengalami gangguan. Mohon coba beberapa saat lagi 🙏",
+        reply: "Maaf, sepertinya sistem sedang sibuk. Boleh ulangi pesanannya Kak? 🙏",
         data: {},
       };
     }
   }
 
-  async extractInvoiceData(imageBuffer) {
+  // VISION / IMAGE PROCESSING (SCAN STRUK)
+  async processImage(base64Data, mimeType, prompt) {
     try {
-      const base64Image = imageBuffer.toString("base64");
+      console.log("[OpenAI] Processing Image Struk...");
 
       const messages = [
         {
@@ -54,14 +53,13 @@ class OpenAiAdapter {
           content: [
             {
               type: "text",
-              text:
-                "Analisa gambar struk. Cari 'Total Tagihan'. " +
-                "Respond ONLY in Valid JSON format: { total_amount: number }",
+              text: `${prompt}. RETURN JSON ONLY: { "total": number }. Contoh: { "total": 50000 }. Jika tidak terbaca/gagal, return { "total": 0 }.`,
             },
             {
               type: "image_url",
               image_url: {
-                url: `data:image/jpeg;base64,${base64Image}`,
+                url: `data:${mimeType};base64,${base64Data}`,
+                detail: "low", // (Fixed ~85 tokens)
               },
             },
           ],
@@ -69,34 +67,25 @@ class OpenAiAdapter {
       ];
 
       const response = await this.openai.chat.completions.create({
-        model: this.visionModel,
+        model: this.modelName,
         messages,
-        max_tokens: 300,
+        max_tokens: 100,
         temperature: 0.1,
+        response_format: { type: "json_object" },
       });
 
-      return this.cleanAndParseJson(response.choices[0].message.content);
+      const rawContent = response.choices[0].message.content;
+      console.log("[OpenAI] Raw Vision:", rawContent);
+
+      const resultObj = JSON.parse(rawContent);
+
+      // Normalisasi output (kadang AI return total_amount, kadang total)
+      const finalAmount = resultObj.total || resultObj.total_amount || resultObj.amount || 0;
+
+      return parseInt(finalAmount);
     } catch (error) {
       console.error("[OpenAI Vision] Error:", error.message);
-      return { total_amount: 0 };
-    }
-  }
-
-  cleanAndParseJson(text) {
-    try {
-      let clean = text.replace(/```json|```/g, "").trim();
-      const first = clean.indexOf("{");
-      const last = clean.lastIndexOf("}");
-      if (first !== -1 && last !== -1) {
-        clean = clean.substring(first, last + 1);
-      }
-      return JSON.parse(clean);
-    } catch (e) {
-      return {
-        intent: "CHITCHAT",
-        reply: text,
-        data: {},
-      };
+      return 0;
     }
   }
 }

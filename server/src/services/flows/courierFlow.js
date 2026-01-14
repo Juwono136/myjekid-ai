@@ -388,7 +388,7 @@ export const handleCourierMessage = async (
         }
         return {
           reply:
-            "*Sedang Mengantar*\n. Tolong Ketik *#SELESAI* jika barang sudah diterima customer yah kak.",
+            "*Sedang Mengantar*\nTolong Ketik *#SELESAI* jika barang sudah diterima customer yah kak.",
         };
       }
     }
