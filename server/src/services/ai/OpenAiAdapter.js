@@ -3,8 +3,8 @@ import OpenAI from "openai";
 class OpenAiAdapter {
   constructor(apiKey) {
     this.openai = new OpenAI({ apiKey });
-    this.modelName = "gpt-4.1-mini";
-    this.visionModel = "gpt-4o"; // Untuk vision
+    this.modelName = "gpt-4o-mini";
+    this.visionModel = "gpt-4o-mini"; // Untuk vision
   }
 
   async generateResponse(systemPrompt, userMessage, context = {}) {
