@@ -133,7 +133,7 @@ export const handleCourierLocation = async (courier, lat, lng, io) => {
 
     console.log(`DB Updated: ${courier.name} -> [${lat}, ${lng}]`);
 
-    // Emit ke Socket.io (Untuk Live Map)
+    // Emit ke Socket.io (Live Map)
     if (io) {
       io.emit("courier-location-update", {
         id: courier.id,
