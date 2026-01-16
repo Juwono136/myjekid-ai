@@ -49,7 +49,7 @@ const OrderDetailModal = ({ isOpen, onClose, orderId }) => {
   };
 
   const imageUrl = orderDetail?.invoice_image_url
-    ? `https://storage.mmsdashboard.dev/myjek-invoices/${orderDetail.invoice_image_url}`
+    ? `https://s3-storage.mmsdashboard.dev/myjek-invoices/${orderDetail.invoice_image_url}`
     : null;
 
   return (
