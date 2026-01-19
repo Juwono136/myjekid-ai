@@ -160,7 +160,7 @@ export const handleCourierMessage = async (
   rawSenderId = null,
   rawBase64 = null,
   locationArg = null,
-  io = null
+  io = null,
 ) => {
   try {
     let location = locationArg;
@@ -186,8 +186,8 @@ export const handleCourierMessage = async (
     console.log(
       `👮 CourierFlow | ${courier ? courier.name : "Guest"} | Input: ${upperText.substring(
         0,
-        20
-      )}...`
+        20,
+      )}...`,
     );
 
     // DEFENSIVE CODING
@@ -260,7 +260,7 @@ export const handleCourierMessage = async (
         if (mediaUrl || rawBase64) {
           await messageService.sendMessage(
             courier.phone,
-            "⏳ *Sedang Scan Struk...*\nSistem sedang menyimpan bukti & scan harga, Mohon tunggu sebentar yah kak..."
+            "⏳ *Sedang Scan Struk...*\nSistem sedang menyimpan bukti & scan harga, Mohon tunggu sebentar yah kak...",
           );
 
           (async () => {
@@ -294,7 +294,7 @@ export const handleCourierMessage = async (
               // Jika AI Service Anda menolak prefix, ganti variabel di bawah ini menjadi 'rawBase64'
               const aiResult = await aiService.readInvoice(
                 formattedBase64,
-                activeOrder.items_summary
+                activeOrder.items_summary,
               );
 
               const detectedTotal =
@@ -304,21 +304,27 @@ export const handleCourierMessage = async (
               await orderService.saveBillDraft(activeOrder.order_id, detectedTotal, storedFileName);
 
               // Auto-Confirm Logic
-              setTimeout(async () => {
-                const freshOrder = await Order.findByPk(activeOrder.order_id);
-                if (
-                  freshOrder &&
-                  freshOrder.status === "BILL_VALIDATION" &&
-                  freshOrder.total_amount === detectedTotal
-                ) {
-                  const autoReply = await executeBillFinalization(courier.id, activeOrder.order_id);
-                  if (autoReply)
-                    await messageService.sendMessage(
-                      courier.phone,
-                      `⚠️ *AUTO-CONFIRM*\n${autoReply}`
+              setTimeout(
+                async () => {
+                  const freshOrder = await Order.findByPk(activeOrder.order_id);
+                  if (
+                    freshOrder &&
+                    freshOrder.status === "BILL_VALIDATION" &&
+                    freshOrder.total_amount === detectedTotal
+                  ) {
+                    const autoReply = await executeBillFinalization(
+                      courier.id,
+                      activeOrder.order_id,
                     );
-                }
-              }, 3 * 60 * 1000);
+                    if (autoReply)
+                      await messageService.sendMessage(
+                        courier.phone,
+                        `⚠️ *AUTO-CONFIRM*\n${autoReply}`,
+                      );
+                  }
+                },
+                3 * 60 * 1000,
+              );
 
               const replyText =
                 `🧾 *HASIL SCAN STRUK/NOTA TAGIHAN*\n` +
@@ -331,7 +337,7 @@ export const handleCourierMessage = async (
               console.error("❌ Error Background Process:", err);
               await messageService.sendMessage(
                 courier.phone,
-                "*Gagal Scan Gambar*\nMaaf kak, Sistem tidak dapat membaca gambar tersebut. Mohon ketik manual total tagihannya (Cth: 50000)."
+                "*Gagal Scan Gambar*\nMaaf kak, Sistem tidak dapat membaca gambar tersebut. Mohon ketik manual total tagihannya (Cth: 50000).",
               );
             }
           })();
@@ -363,7 +369,7 @@ export const handleCourierMessage = async (
           await activeOrder.update({ total_amount: newTotal });
           return {
             reply: `*Revisi Harga Berhasil*\nTotal Tagihan (setelah di update): *${toIDR(
-              newTotal
+              newTotal,
             )}*.\n\nApakah sudah benar kak? Ketik *OK* / *Y* jika sudah pas/benar.`,
           };
         }
@@ -379,7 +385,7 @@ export const handleCourierMessage = async (
           await orderService.completeOrder(activeOrder.order_id, courier.id);
           await messageService.sendMessage(
             activeOrder.user_phone,
-            "Terima kasih sudah order di MyJek yah kak! Ditunggu order selanjutnya. 🥰"
+            "Terima kasih sudah order di MyJek yah kak! Ditunggu order selanjutnya. 🥰",
           );
           return {
             reply:

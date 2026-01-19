@@ -3,164 +3,138 @@ import AIAdapterFactory from "./AIAdapterFactory.js";
 
 class AIService {
   constructor() {
-    // Meminta Factory membuatkan adapter yang sesuai file .env
     this.adapter = AIAdapterFactory.createAdapter();
   }
 
-  async parseOrder(text, context) {
+  // ============================================================
+  // 1. BRAIN: AI AGENT (USER FLOW)
+  // ============================================================
+  async chatWithAgent(user, draftOrder, userMessage) {
+    // 1. Context Data (Memory)
+    const contextData = {
+      customer_name: user.name || "Kak",
+      customer_phone: user.phone,
+      existing_address: user.address_text || "Belum ada",
+      has_location_coords: !!(user.latitude && user.longitude),
+
+      // Status Order Draft
+      current_draft: draftOrder
+        ? {
+            items: draftOrder.items_summary,
+            pickup: draftOrder.pickup_address,
+            delivery: draftOrder.delivery_address,
+            total_estimated: draftOrder.total_amount,
+          }
+        : "Belum ada order aktif.",
+
+      // Pesan User (Bisa berisi info dari System soal gambar struk)
+      user_input: userMessage,
+    };
+
+    // 2. System Prompt (Instruksi Perilaku)
     const SYSTEM_PROMPT = `
-      ROLE: Customer Service 'MyJek' (Aplikasi Ojek & Kurir Online di Sumbawa).
-      TONE: Ramah, Terstruktur, Singkat, dan Membantu.
+      ROLE: Kamu adalah "MyJek Assistant", customer service profesional (AI Agent) yang ramah, luwes, dan cerdas.
+      GOAL: Bantu user membuat pesanan (Order) sampai data lengkap (Item, Lokasi Jemput, Lokasi Antar).
 
-      DOMAIN RESTRICTION (CRITICAL):
-      - Kamu HANYA boleh menjawab topik seputar: Pemesanan, Cek Status, Alamat, dan Kurir.
-      - Jika user bertanya topik lain (Fisika, Coding, Politik, Agama, PR Sekolah), TOLAK dengan sopan. 
-        Contoh: "Maaf Kak, saya adalah Asisten khusus untuk pesan antar dari MyJek, jadi belum paham soal itu hehe. 😅🙏"
-
-      CONTEXT DATA:
-      - Nama User: ${context.user_name}
-      - Status Order: ${context.current_order_status}
-      - Data Draft (Memory): ${JSON.stringify(context.draft_data || {})}
-      - History Alamat: ${context.history_address || "Belum ada"}
-
-      TUGAS UTAMA:
-      Analisa pesan masuk, EKSTRAK entitas (Item, Pickup, Address), lalu tentukan INTENT.
-
-      ATURAN INTENT:
-      1. "CHECK_STATUS" 
-         -> User bertanya posisi/status (e.g., "Pesanan saya mana?", "Belum sampai?").
+      STYLE:
+      - Bicara natural bahasa Indonesia sehari-hari yang sopan (seperti Admin Online Shop profesional).
+      - Jangan kaku! Gunakan emoji secukupnya (🙏, 😊, 👍).
+      - JIKA user melakukan "Hit and Run" (info borongan), LANGSUNG tangkap semua infonya.
       
-      2. "CHITCHAT" 
-         -> Sapaan ("Halo", "Pagi").
-         -> Ucapan sopan penutup ("Makasih", "Oke thanks", "Siap", "Mantap").
-         -> Pertanyaan di luar topik MyJek.
+      LOGIC HANDLING:
+      - Jika user kirim ALAMAT tapi belum share location (koordinat), ingatkan sopan: "Boleh minta Share Location (Peta) nya kak biar akurat?".
+      - Jika di input ada info "[SYSTEM: User kirim foto STRUK tagihan senilai Rp X]", maka anggap user sudah konfirmasi harga/bayar. Respon dengan terima kasih.
       
-      3. "CONFIRM_FINAL" 
-         -> User bilang "Ya", "Benar", "Gas", "Lanjut" SAAT status order = WAITING_CONFIRMATION.
-      
-      4. "CANCEL" 
-         -> User ingin membatalkan ("Batal", "Cancel", "Gajadi").
-
-      5. "ORDER_COMPLETE" 
-         -> Jika Data (Item + Pickup + Address) SUDAH LENGKAP (baik dari pesan ini atau gabungan Memory).
-         -> Jika User melakukan REVISI data draft yang membuat data jadi lengkap.
-
-      6. "ORDER_INCOMPLETE" 
-         -> Jika ingin pesan tapi data masih kurang (misal: cuma sebut menu, tapi alamat belum).
-
-      ATURAN EKSTRAKSI DATA:
-      - Jika User memberikan alamat baru, TIMPA alamat lama.
-      - Jika User bilang "Ke alamat biasa", gunakan "${context.history_address}".
-      - Pastikan "qty" selalu angka (default 1 jika tidak disebut).
-
-      FORMAT OUTPUT JSON (WAJIB):
+      OUTPUT FORMAT (JSON ONLY):
       {
-        "intent": "ORDER_COMPLETE" | "ORDER_INCOMPLETE" | "CONFIRM_FINAL" | "CANCEL" | "CHECK_STATUS" | "CHITCHAT",
-        "data": {
-           "items": [{ "item": "Nama Menu", "qty": 1, "note": "pedas" }],
-           "pickup_location": "String (Nama Warung/Toko)",
-           "delivery_address": "String (Alamat Lengkap)" 
+        "thought": "Analisa singkat situasinya",
+        "reply_text": "Kalimat jawabanmu ke user (ini yang akan dibaca user)",
+        "extracted_data": {
+          "items": Array<{item: string, qty: number, note: string}> (Gabung dengan item lama jika ada),
+          "pickup_address": "String (Nama resto/toko)",
+          "delivery_address": "String (Alamat tujuan)",
+          "is_finalized": boolean (Set true HANYA jika Item, Pickup, dan Delivery sudah JELAS)
         },
-        "ai_reply": "String text untuk user"
+        "intent": "ORDER_FLOW" | "CANCEL" | "CHITCHAT" | "COMPLAINT"
       }
-
-      GUIDE PENGISIAN 'ai_reply':
-      - Jika CHITCHAT (Out of scope): Tolak sopan.
-      - Jika CHITCHAT (Sopan santun): Balas ramah ("Sama-sama kak!").
-      - Jika ORDER_INCOMPLETE: Tanyakan data yang kurang (Contoh: "Siap kak, mau diantar ke alamat mana?").
-      - Jika ORDER_COMPLETE: Cukup bilang "Baik kak, mohon dicek ringkasannya di bawah ini 👇" (JANGAN TULIS ULANG STRUK DI SINI, Sistem yang akan buat).
     `;
 
-    const result = await this.adapter.generateResponse(SYSTEM_PROMPT, text, context);
-
-    return result;
-  }
-
-  // Fungsi untuk Membaca Struk/Invoice
-  async readInvoice(imageInput, itemsSummary = []) {
+    // 3. Generate Response
     try {
-      console.log("AI Processing: Start reading invoice...");
+      const aiResponse = await this.adapter.generateResponse(
+        SYSTEM_PROMPT,
+        JSON.stringify(contextData),
+      );
 
-      let imageBase64 = "";
-
-      // Jika Input adalah URL (Http/Https)
-      if (imageInput.startsWith("http://") || imageInput.startsWith("https://")) {
-        console.log(`🤖 AI: Downloading image from URL...`);
-        // Download via Axios helper di bawah
-        imageBase64 = await this.downloadImageAsBase64(imageInput);
-      }
-      // Jika Input sudah berupa String Base64 (Raw Data)
-      else if (imageInput.length > 100) {
-        console.log("🤖 AI: Receiving direct Base64 input...");
-        // Bersihkan prefix 'data:image/jpeg;base64,' jika terbawa, agar murni raw base64
-        imageBase64 = imageInput.replace(/^data:image\/\w+;base64,/, "");
+      if (!aiResponse || !aiResponse.reply_text) {
+        throw new Error("Empty response from AI Agent");
       }
 
-      // Validasi Akhir sebelum dikirim ke Adapter
-      if (!imageBase64) {
-        throw new Error(
-          "Gagal mendapatkan data gambar (Input bukan URL valid & bukan Base64 valid)"
-        );
-      }
-
-      console.log("Image ready. Asking Adapter to process...");
-
-      const prompt = `
-        Peran: Kamu adalah mesin OCR (Optical Character Recognition) khusus struk belanja.
-        Tugas: Ekstrak "TOTAL PEMBAYARAN" atau "GRAND TOTAL" dari gambar ini.
-
-        Konteks Barang: ${JSON.stringify(itemsSummary)}
-
-        INSTRUKSI PENTING:
-        1. Cari angka nominal uang terbesar yang merepresentasikan total akhir transaksi.
-        2. HANYA tuliskan angkanya saja. JANGAN pakai teks 'Rp', titik, koma, atau spasi.
-        3. Contoh Output Benar: 50000
-        4. Contoh Output Salah: "Totalnya 50.000", "Rp 50.000", "50,000"
-        
-        Jika tidak yakin atau gambar buram, jawab: 0
-      `;
-
-      const rawResponse = await this.adapter.processImage(imageBase64, "image/jpeg", prompt);
-
-      let textString = "";
-
-      if (typeof rawResponse === "string") {
-        textString = rawResponse;
-      } else if (typeof rawResponse === "object") {
-        textString = JSON.stringify(rawResponse);
-      } else {
-        // Jika number atau tipe lain
-        textString = String(rawResponse);
-      }
-
-      console.log(`DEBUG RAW AI RESPONSE (Type: ${typeof rawResponse}): "${textString}"`);
-
-      // Clean Result (Sekarang aman karena textString PASTI string)
-      const cleanText = textString.replace(/[^0-9]/g, "");
-      const cleanTotal = parseInt(cleanText) || 0;
-
-      console.log(`AI Parsed Result: Rp ${cleanTotal}`);
-      return { total: cleanTotal };
+      console.log("🤖 AI Agent Thought:", aiResponse.thought);
+      return aiResponse;
     } catch (error) {
-      console.error("AI Service Error:", error.message);
-      // Return 0 agar tidak crash, flow bisa lanjut ke input manual
-      return { total: 0 };
+      console.error("❌ AI Agent Error:", error);
+      return {
+        reply_text: "Waduh, koneksi saya agak gangguan kak. Boleh ulangi pesannya? 🙏",
+        extracted_data: {},
+        intent: "CHITCHAT",
+      };
     }
   }
 
-  // Download Gambar (base64)
+  // ============================================================
+  // 2. VISION: READ RECEIPT / STRUK (TOTAL BILL)
+  // ============================================================
+  /**
+   * Khusus membaca gambar struk/nota dan mengambil "Total Tagihan".
+   * Return: Number (Total Amount)
+   */
+  async analyzeReceiptImage(imageUrl) {
+    try {
+      console.log(`🧾 Analyzing Receipt: ${imageUrl}`);
+
+      const base64Data = await this.downloadImageAsBase64(imageUrl);
+      if (!base64Data) return 0;
+
+      // Prompt spesifik agar AI fokus cari angka duit total
+      const prompt = `
+        Analisa gambar ini. Ini adalah struk belanja atau bukti transfer.
+        Cari angka "TOTAL BAYAR" atau "TOTAL TRANSFER" atau "JUMLAH".
+        Abaikan rincian item. HANYA ambil angka total akhirnya saja.
+        Jika tidak menemukan angka uang yang valid, return 0.
+      `;
+
+      // Panggil Adapter Vision
+      // Kita minta return JSON { total: number }
+      const rawResponse = await this.adapter.processImage(base64Data, "image/jpeg", prompt);
+
+      // Parsing hasil (Support return object atau string)
+      let total = 0;
+      if (typeof rawResponse === "object" && rawResponse.total) {
+        total = parseInt(rawResponse.total);
+      } else if (typeof rawResponse === "string") {
+        const clean = rawResponse.replace(/[^0-9]/g, "");
+        total = parseInt(clean) || 0;
+      }
+
+      console.log(`💰 Struk Total Detected: Rp ${total}`);
+      return total;
+    } catch (error) {
+      console.error("❌ Receipt Analysis Error:", error.message);
+      return 0; // Return 0 jika gagal, agar flow tidak error
+    }
+  }
+
+  // Helper: Download Image
   async downloadImageAsBase64(url) {
     try {
       const response = await axios.get(url, {
         responseType: "arraybuffer",
-        headers: {
-          "X-Api-Key": process.env.WAHA_API_KEY || "",
-          Accept: "*/*",
-        },
+        headers: { Accept: "*/*" }, // Sesuaikan header jika butuh API Key
       });
       return Buffer.from(response.data, "binary").toString("base64");
     } catch (error) {
-      console.error(`Gagal download gambar: ${url} | ${error.message}`);
+      console.error("❌ Failed download image:", error.message);
       return null;
     }
   }

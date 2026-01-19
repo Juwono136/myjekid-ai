@@ -89,7 +89,7 @@ const OrderDetailModal = ({ isOpen, onClose, orderId }) => {
                 {/* Status Banner */}
                 <div
                   className={`flex items-center gap-3 p-4 rounded-xl border mb-6 ${getStatusColor(
-                    orderDetail.status
+                    orderDetail.status,
                   )}`}
                 >
                   <FiNavigation size={20} />

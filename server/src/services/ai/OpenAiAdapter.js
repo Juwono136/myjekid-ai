@@ -3,63 +3,51 @@ import OpenAI from "openai";
 class OpenAiAdapter {
   constructor(apiKey) {
     this.openai = new OpenAI({ apiKey });
-    this.modelName = "gpt-4o-mini";
+    this.modelName = "gpt-4o-mini"; // Disarankan pakai model 'mini' atau 'gpt-4o' agar cepat & murah
   }
 
-  // TEXT CHAT GENERATION
-  async generateResponse(systemPrompt, userText, context = {}) {
+  // --- GENERATE RESPONSE (CHAT AGENT) ---
+  async generateResponse(systemPrompt, userContextString) {
     try {
-      // Optimasi Token: Jika history chat terlalu panjang, potong di logic flow (bukan disini).
-      const contextString = JSON.stringify(context);
-
       const messages = [
         {
           role: "system",
-          content: `${systemPrompt}\n\nIMPORTANT: You are a JSON generator. You must output VALID JSON only.`,
+          content: systemPrompt,
         },
         {
           role: "user",
-          content: `CONTEXT: ${contextString}\nUSER SAYS: "${userText}"\n\nRespond in JSON format: { "intent": "STRING", "reply": "STRING", "data": OBJECT }`,
+          content: `CURRENT CONTEXT: ${userContextString}`,
         },
       ];
 
       const completion = await this.openai.chat.completions.create({
         model: this.modelName,
         messages,
-        temperature: 0.3, // Sedikit kreatif tapi tetap patuh aturan
-        response_format: { type: "json_object" },
+        temperature: 0.7, // Kreativitas sedang agar natural
+        response_format: { type: "json_object" }, // Wajib JSON
       });
 
       const rawContent = completion.choices[0].message.content;
       return JSON.parse(rawContent);
     } catch (error) {
-      console.error("[OpenAI] Text Error:", error.message);
-      return {
-        intent: "CHITCHAT",
-        reply: "Maaf, sepertinya sistem sedang sibuk. Boleh ulangi pesanannya Kak? 🙏",
-        data: {},
-      };
+      console.error("[OpenAI] Generate Error:", error.message);
+      return null;
     }
   }
 
-  // VISION / IMAGE PROCESSING (SCAN STRUK)
+  // --- PROCESS IMAGE (VISION) ---
   async processImage(base64Data, mimeType, prompt) {
     try {
-      console.log("[OpenAI] Processing Image Struk...");
-
       const messages = [
         {
           role: "user",
           content: [
-            {
-              type: "text",
-              text: `${prompt}. RETURN JSON ONLY: { "total": number }. Contoh: { "total": 50000 }. Jika tidak terbaca/gagal, return { "total": 0 }.`,
-            },
+            { type: "text", text: `${prompt} REMEMBER: Return Valid JSON object.` },
             {
               type: "image_url",
               image_url: {
                 url: `data:${mimeType};base64,${base64Data}`,
-                detail: "low", // (Fixed ~85 tokens)
+                detail: "low", // 'Low' cukup untuk baca angka struk, lebih hemat token
               },
             },
           ],
@@ -69,23 +57,15 @@ class OpenAiAdapter {
       const response = await this.openai.chat.completions.create({
         model: this.modelName,
         messages,
-        max_tokens: 100,
-        temperature: 0.1,
-        response_format: { type: "json_object" },
+        max_tokens: 300,
+        response_format: { type: "json_object" }, // Paksa JSON output
       });
 
       const rawContent = response.choices[0].message.content;
-      console.log("[OpenAI] Raw Vision:", rawContent);
-
-      const resultObj = JSON.parse(rawContent);
-
-      // Normalisasi output (kadang AI return total_amount, kadang total)
-      const finalAmount = resultObj.total || resultObj.total_amount || resultObj.amount || 0;
-
-      return parseInt(finalAmount);
+      return JSON.parse(rawContent);
     } catch (error) {
-      console.error("[OpenAI Vision] Error:", error.message);
-      return 0;
+      console.error("[OpenAI] Vision Error:", error.message);
+      return null;
     }
   }
 }
