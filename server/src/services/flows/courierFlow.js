@@ -18,6 +18,59 @@ const toIDR = (num) =>
 const BASE_IMAGE_URL =
   `${process.env.BASE_IMAGE_URL}/${process.env.S3_BUCKET_NAME}` || "http://localhost:3000/uploads";
 
+const normalizeNote = (note) =>
+  (note || "")
+    .toString()
+    .toLowerCase()
+    .replace(/bilang aja\s+/g, "")
+    .replace(/bilang\s+/g, "")
+    .replace(/\bdri\b/g, "dari")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const uniqueNotesList = (notes = []) => {
+  const seen = new Set();
+  return notes
+    .map((n) => (typeof n === "string" ? n : n?.note))
+    .filter(Boolean)
+    .filter((note) => {
+      const key = normalizeNote(note);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+};
+
+const buildCourierContext = ({
+  courier,
+  order,
+  user,
+  items = [],
+  pickup = "",
+  address = "",
+  notes = [],
+  flags = {},
+  lastMessage = "",
+}) => ({
+  role: "COURIER",
+  courier_name: courier?.name || "Kurir",
+  courier_status: courier?.status || "UNKNOWN",
+  order_status: order?.status || "NONE",
+  items,
+  pickup,
+  address,
+  notes: uniqueNotesList(notes),
+  user_name: user?.name || "Customer",
+  user_phone: user?.phone || order?.user_phone || "",
+  flags,
+  last_message: lastMessage,
+});
+
+const buildCourierReply = async (responseSpec) => {
+  return await aiService.generateReply(responseSpec);
+};
+
 const getDashboardReply = (courier) => {
   const statusIcon = courier.status === "IDLE" ? "🟢" : courier.status === "BUSY" ? "🔴" : "⚫";
   const locStatus = courier.current_latitude ? "📍 Terkonfirmasi" : "⚠️ Belum ada lokasi";
@@ -33,7 +86,7 @@ const getDashboardReply = (courier) => {
     `▶️ *#SIAP* : Aktifkan Akun Untuk Menerima Order\n` +
     `⏸️ *#OFF* : Matikan Akun (Istirahat/Offline)\n` +
     `➡️ *#INFO* : Cek Status Kurir Saat ini\n\n` +
-    `*PENTING:* Sebagai kurir, kamu wahib aktifkan lokasi terkini dengan cara: 👉 Klik tombol *Clip (📎)* di WA -> Pilih *Location* -> *Send Your Current Location* untuk mendapatkan order. \n\n` +
+    `*PENTING:* Sebagai kurir, kamu wajib aktifkan lokasi terkini dengan cara: 👉 Klik tombol *Clip (📎)* di WA -> Pilih *Location* -> *Send Your Current Location* untuk mendapatkan order. \n\n` +
     `_Tetap semangat & hati-hati di jalan!_ 💪`
   );
 };
@@ -84,22 +137,38 @@ const executeBillFinalization = async (courier, orderId) => {
       imageUrl = `${BASE_IMAGE_URL}/${imageUrl}`;
     }
 
-    // Pesan Caption untuk User (Disederhanakan)
-    const userCaption =
-      `✅ *ORDER SELESAI DIBELANJAKAN!*\n` +
-      `Halo Kak ${user.name}, pesanan sudah dibeli oleh kurir bernama ${courier.name}.\n\n` +
-      `🗒️ *TOTAL TAGIHAN: ${toIDR(finalTotal)}*\n` +
-      `_(Sudah termasuk harga barang, ongkos kirim dan jasa titip)_\n\n` +
-      `Mohon siapkan uang pas ya Kak. Driver atau kurir kami segera meluncur! 🛵\n` +
-      `📸 *LINK FOTO STRUK/NOTA TERLAMPIR DIBAWAH INI 👇*`;
+    const userCaption = await aiService.generateReply({
+      role: "CUSTOMER",
+      status: "BILL_SENT_TO_CUSTOMER",
+      context: {
+        role: "CUSTOMER",
+        user_name: user.name,
+        courier_name: courier.name,
+        order_status: order.status,
+        items: order.items_summary || [],
+        pickup: order.pickup_address,
+        address: order.delivery_address,
+        notes: uniqueNotesList(order.order_notes || []),
+        total_amount: finalTotal,
+        flags: { show_details: true },
+        last_message: "",
+      },
+    });
 
-    // Kirim Notifikasi ke Kurir (Direct Message)
-    const courierMsg =
-      `✅ *TAGIHAN TERKONFIRMASI!*\n` +
-      `Nominal: ${toIDR(finalTotal)}\n\n` +
-      `Foto struk sedang dikirim otomatis ke Customer...\n` +
-      `👉 Silakan antar pesanan ke: ${order.delivery_address}\n\n` +
-      `Ketik *#SELESAI* nanti jika barang sudah diterima customer yah kak.`;
+    const courierMsg = await aiService.generateReply({
+      role: "COURIER",
+      status: "BILL_CONFIRMED",
+      context: buildCourierContext({
+        courier,
+        order,
+        user,
+        items: order.items_summary || [],
+        pickup: order.pickup_address || "",
+        address: order.delivery_address || "",
+        notes: uniqueNotesList(order.order_notes || []),
+        flags: { total_amount: finalTotal, action: "DELIVER_ORDER", show_details: false },
+      }),
+    });
 
     await messageService.sendMessage(courier.phone, courierMsg);
 
@@ -130,6 +199,12 @@ export const handleCourierLocation = async (courier, lat, lng, io) => {
       current_longitude: lng,
       last_active_at: new Date(),
     });
+
+    // Jika kurir OFFLINE, anggap lokasi ini sebagai "online kembali"
+    if (courier.status === "OFFLINE") {
+      await courier.update({ status: "IDLE", is_active: true });
+      await redisClient.sAdd("online_couriers", String(courier.id));
+    }
 
     console.log(`DB Updated: ${courier.name} -> [${lat}, ${lng}]`);
 
@@ -163,6 +238,15 @@ export const handleCourierMessage = async (
   io = null,
 ) => {
   try {
+    const LOCATION_INSTRUCTION =
+      "*Penting:* Selalu update lokasi terkini kamu yah agar pelanggan bisa tau posisi ordernya secara real-time. \n\nSilahkan klik tombol *Clip (📎)* di WA -> Pilih *Location* -> *Send Your Current Location*.\n\nTerima kasih, semangat kak!😃👍";
+    const makeCourierReply = async (status, context, required_phrases = []) =>
+      await buildCourierReply({
+        role: "COURIER",
+        status,
+        context,
+        required_phrases,
+      });
     let location = locationArg;
 
     if (mediaUrl && typeof mediaUrl === "object") {
@@ -192,23 +276,42 @@ export const handleCourierMessage = async (
 
     // DEFENSIVE CODING
     if (upperText === "#TEST KURIR") {
-      return { reply: "🛠️ *MODE TESTING AKTIF*\nAnda sekarang dalam simulasi sebagai Kurir." };
+      return {
+        reply: await makeCourierReply(
+          "TEST_MODE_COURIER",
+          buildCourierContext({ courier, lastMessage: text }),
+        ),
+      };
     }
     if (upperText === "#TEST USER") {
-      return { reply: "🛠️ Silakan ketik perintah user." };
+      return {
+        reply: await makeCourierReply(
+          "TEST_MODE_USER",
+          buildCourierContext({ courier, lastMessage: text }),
+        ),
+      };
     }
 
     // LOGIN FLOW
     if (upperText.startsWith("#LOGIN")) {
       const inputPhone = upperText.split(" ")[1];
-      if (!inputPhone) return { reply: "*Format Salah*\nContoh: `#LOGIN 08123456789`" };
+      if (!inputPhone)
+        return {
+          reply: await makeCourierReply(
+            "LOGIN_FORMAT_INVALID",
+            buildCourierContext({ courier, lastMessage: text }),
+          ),
+        };
 
       const cleanPhone = sanitizePhoneNumber(inputPhone);
 
       if (courier) {
         if (rawSenderId) await courier.update({ device_id: rawSenderId });
         return {
-          reply: `✅ *AKUN TERHUBUNG*\nHalo kak ${courier.name}, perangkat kamu sudah aktif. Ketik *#SIAP* untuk memulai shift.`,
+          reply: await makeCourierReply(
+            "COURIER_ACCOUNT_LINKED",
+            buildCourierContext({ courier, lastMessage: text }),
+          ),
         };
       }
 
@@ -221,7 +324,10 @@ export const handleCourierMessage = async (
 
       await targetCourier.update({ device_id: rawSenderId });
       return {
-        reply: `*SELAMAT DATANG ${targetCourier.name}!*\nDevice sudah terhubung ni kak. Ketik *#SIAP* untuk mulai shift.`,
+        reply: await makeCourierReply(
+          "COURIER_WELCOME",
+          buildCourierContext({ courier: targetCourier, lastMessage: text }),
+        ),
       };
     }
 
@@ -232,20 +338,23 @@ export const handleCourierMessage = async (
 
       // Balasan Khusus Kurir
       return {
-        reply: `✅ *POSISI TERUPDATE!*\n\nLokasi Kamu sebagai kurir telah tersimpan di sistem admin.\nStatus: *${
-          courier?.status || "Aktif"
-        }*\n\n*PENTING*: Selalu Update lokasi terakhir kamu kepada saya yah kak terutama saat sedang sedang aktif (IDLE) ataupun saat menjalankan order pelanggan. Terima kasih 👍`,
+        reply: await makeCourierReply(
+          "COURIER_LOCATION_UPDATED",
+          buildCourierContext({ courier, lastMessage: text }),
+          [LOCATION_INSTRUCTION],
+        ),
       };
     }
 
     if (!courier) {
       return {
-        reply:
-          "Silakan Login terlebih dahulu kak, ketik:\n*#LOGIN <NOMOR_HP_ANDA>* (contoh: 08123456789)",
+        reply: await makeCourierReply(
+          "COURIER_LOGIN_REQUIRED",
+          buildCourierContext({ courier, lastMessage: text }),
+        ),
       };
     }
 
-    // C. ACTIVE ORDER FLOW (ON_PROCESS / SCAN STRUK)
     const activeOrder = await Order.findOne({
       where: {
         courier_id: courier.id,
@@ -254,100 +363,227 @@ export const handleCourierMessage = async (
       include: [{ model: Courier, as: "courier" }],
     });
 
+    // Courier status query or toggle via natural language
+    const lowerText = text ? text.toLowerCase() : "";
+    const wantsOffline = ["offline", "off", "istirahat", "cuti"].some((w) => lowerText.includes(w));
+    const wantsOnline = ["online", "aktif", "siap", "kembali"].some((w) => lowerText.includes(w));
+    const asksStatus = ["status", "cek status", "info status", "lagi apa", "sibuk"].some((w) =>
+      lowerText.includes(w),
+    );
+
+    if (wantsOffline) {
+      if (activeOrder) {
+        return {
+          reply: await makeCourierReply(
+            "COURIER_STATUS_CHANGE_BLOCKED",
+            buildCourierContext({
+              courier,
+              order: activeOrder,
+              items: activeOrder.items_summary || [],
+              pickup: activeOrder.pickup_address || "",
+              address: activeOrder.delivery_address || "",
+              notes: uniqueNotesList(activeOrder.order_notes || []),
+              lastMessage: text,
+            }),
+          ),
+        };
+      }
+      await courier.update({ status: "OFFLINE", device_id: null, is_active: false });
+      await redisClient.sRem("online_couriers", String(courier.id));
+      return {
+        reply: await makeCourierReply(
+          "COURIER_OFFLINE",
+          buildCourierContext({ courier, lastMessage: text }),
+        ),
+      };
+    }
+
+    if (wantsOnline) {
+      if (activeOrder) {
+        return {
+          reply: await makeCourierReply(
+            "COURIER_STATUS_CHANGE_BLOCKED",
+            buildCourierContext({
+              courier,
+              order: activeOrder,
+              items: activeOrder.items_summary || [],
+              pickup: activeOrder.pickup_address || "",
+              address: activeOrder.delivery_address || "",
+              notes: uniqueNotesList(activeOrder.order_notes || []),
+              lastMessage: text,
+            }),
+          ),
+        };
+      }
+      if (!courier.current_latitude || !courier.current_longitude) {
+        return {
+          reply: await makeCourierReply(
+            "COURIER_LOCATION_REQUIRED",
+            buildCourierContext({ courier, lastMessage: text }),
+            [LOCATION_INSTRUCTION],
+          ),
+        };
+      }
+      await courier.update({
+        status: "IDLE",
+        last_active_at: new Date(),
+        device_id: courier.device_id || rawSenderId,
+        is_active: true,
+      });
+      await redisClient.sAdd("online_couriers", String(courier.id));
+      return {
+        reply: await makeCourierReply(
+          "COURIER_READY",
+          buildCourierContext({ courier, lastMessage: text }),
+        ),
+      };
+    }
+
+    // C. ACTIVE ORDER FLOW (ON_PROCESS / SCAN STRUK)
+    const handleScan = async (order) => {
+      (async () => {
+        try {
+          const fileName = `invoice_${order.order_id}_${Date.now()}.jpg`;
+          const imageInput = mediaUrl || rawBase64;
+          let storedFileName = null;
+          let imageForAI = imageInput;
+
+          try {
+            if (typeof imageInput === "string" && imageInput.startsWith("http")) {
+              storedFileName = await storageService.uploadFileFromUrl(imageInput, fileName);
+            } else {
+              storedFileName = await storageService.uploadBase64(imageInput, fileName);
+            }
+          } catch (uploadErr) {
+            console.error("❌ Upload MinIO Error:", uploadErr);
+          }
+
+          if (storedFileName) {
+            const downloadedBase64 = await storageService.downloadFileAsBase64(storedFileName);
+            if (downloadedBase64) {
+              imageForAI = `data:image/jpeg;base64,${downloadedBase64}`;
+            }
+          }
+
+          const aiResult = await aiService.readInvoice(
+            imageForAI,
+            order.items_summary,
+          );
+
+          const detectedTotal =
+            typeof aiResult === "object" ? aiResult.total : parseInt(aiResult) || 0;
+
+          await orderService.saveBillDraft(order.order_id, detectedTotal, storedFileName);
+
+          setTimeout(
+            async () => {
+              const freshOrder = await Order.findByPk(order.order_id);
+              if (
+                freshOrder &&
+                freshOrder.status === "BILL_VALIDATION" &&
+                freshOrder.total_amount === detectedTotal
+              ) {
+                const autoReply = await executeBillFinalization(courier.id, order.order_id);
+                if (autoReply) {
+                  await messageService.sendMessage(
+                    courier.phone,
+                    `⚠️ *AUTO-CONFIRM*\n${autoReply}`,
+                  );
+                }
+              }
+            },
+            3 * 60 * 1000,
+          );
+
+          const scanResultReply = await makeCourierReply(
+            "SCAN_RESULT",
+            buildCourierContext({
+              courier,
+              order,
+              items: order.items_summary || [],
+              pickup: order.pickup_address || "",
+              address: order.delivery_address || "",
+              notes: uniqueNotesList(order.order_notes || []),
+              flags: { detected_total: detectedTotal },
+              lastMessage: text,
+            }),
+          );
+          await messageService.sendMessage(courier.phone, scanResultReply);
+        } catch (err) {
+          console.error("❌ Error Background Process:", err);
+          const scanFailedReply = await makeCourierReply(
+            "SCAN_FAILED",
+            buildCourierContext({
+              courier,
+              order,
+              items: order.items_summary || [],
+              pickup: order.pickup_address || "",
+              address: order.delivery_address || "",
+              notes: uniqueNotesList(order.order_notes || []),
+              lastMessage: text,
+            }),
+          );
+          await messageService.sendMessage(courier.phone, scanFailedReply);
+        }
+      })();
+
+      return null;
+    };
+
+    if (asksStatus) {
+      return {
+        reply: await makeCourierReply(
+          "COURIER_ORDER_STATUS",
+          buildCourierContext({
+            courier,
+            order: activeOrder || null,
+            items: activeOrder?.items_summary || [],
+            pickup: activeOrder?.pickup_address || "",
+            address: activeOrder?.delivery_address || "",
+            notes: uniqueNotesList(activeOrder?.order_notes || []),
+            flags: { show_details: false },
+            lastMessage: text,
+          }),
+        ),
+      };
+    }
+
+    if (activeOrder && (mediaUrl || rawBase64)) {
+      if (activeOrder.status !== "ON_PROCESS") {
+        return {
+          reply: await makeCourierReply(
+            "SCAN_NOT_ALLOWED",
+            buildCourierContext({
+              courier,
+              order: activeOrder,
+              items: activeOrder.items_summary || [],
+              pickup: activeOrder.pickup_address || "",
+              address: activeOrder.delivery_address || "",
+              notes: uniqueNotesList(activeOrder.order_notes || []),
+              lastMessage: text,
+            }),
+          ),
+        };
+      }
+      return await handleScan(activeOrder);
+    }
+
     if (activeOrder) {
       // FASE BELANJA (ON_PROCESS)
       if (activeOrder.status === "ON_PROCESS") {
-        if (mediaUrl || rawBase64) {
-          await messageService.sendMessage(
-            courier.phone,
-            "⏳ *Sedang Scan Struk...*\nSistem sedang menyimpan bukti & scan harga, Mohon tunggu sebentar yah kak...",
-          );
-
-          (async () => {
-            try {
-              const fileName = `invoice_${activeOrder.order_id}_${Date.now()}.jpg`;
-              const imageInput = mediaUrl || rawBase64;
-              let storedFileName;
-
-              // UPLOAD KE MINIO
-              if (typeof imageInput === "string" && imageInput.startsWith("http")) {
-                storedFileName = await storageService.uploadFileFromUrl(imageInput, fileName);
-              } else {
-                storedFileName = await storageService.uploadBase64(imageInput, fileName);
-              }
-
-              if (!storedFileName) throw new Error("Gagal simpan ke MinIO");
-              console.log(`Upload MinIO Sukses: ${storedFileName}`);
-
-              // BYPASS URL ISSUE -> DOWNLOAD BASE64 DARI MINIO
-              const rawBase64 = await storageService.downloadFileAsBase64(storedFileName);
-
-              if (!rawBase64) throw new Error("Gagal download Base64 dari MinIO (Data Kosong)");
-
-              // FORMATTING & SEND TO AI
-              // Tambahkan prefix agar dikenali sebagai valid Image Data URI
-              const formattedBase64 = `data:image/jpeg;base64,${rawBase64}`;
-
-              console.log(`AI Processing: Mengirim Base64 (Length: ${rawBase64.length})`);
-
-              // Coba kirim dengan prefix (formattedBase64)
-              // Jika AI Service Anda menolak prefix, ganti variabel di bawah ini menjadi 'rawBase64'
-              const aiResult = await aiService.readInvoice(
-                formattedBase64,
-                activeOrder.items_summary,
-              );
-
-              const detectedTotal =
-                typeof aiResult === "object" ? aiResult.total : parseInt(aiResult) || 0;
-
-              // Simpan Draft
-              await orderService.saveBillDraft(activeOrder.order_id, detectedTotal, storedFileName);
-
-              // Auto-Confirm Logic
-              setTimeout(
-                async () => {
-                  const freshOrder = await Order.findByPk(activeOrder.order_id);
-                  if (
-                    freshOrder &&
-                    freshOrder.status === "BILL_VALIDATION" &&
-                    freshOrder.total_amount === detectedTotal
-                  ) {
-                    const autoReply = await executeBillFinalization(
-                      courier.id,
-                      activeOrder.order_id,
-                    );
-                    if (autoReply)
-                      await messageService.sendMessage(
-                        courier.phone,
-                        `⚠️ *AUTO-CONFIRM*\n${autoReply}`,
-                      );
-                  }
-                },
-                3 * 60 * 1000,
-              );
-
-              const replyText =
-                `🧾 *HASIL SCAN STRUK/NOTA TAGIHAN*\n` +
-                `Total Tagihan: *${toIDR(detectedTotal)}*\n\n` +
-                `✅ Ketik *Y* / *OK* jika benar.\n` +
-                `✏️ Ketik *Angka* (cth: 50000) jika nonimal total tagihan tidak sesuai.`;
-
-              await messageService.sendMessage(courier.phone, replyText);
-            } catch (err) {
-              console.error("❌ Error Background Process:", err);
-              await messageService.sendMessage(
-                courier.phone,
-                "*Gagal Scan Gambar*\nMaaf kak, Sistem tidak dapat membaca gambar tersebut. Mohon ketik manual total tagihannya (Cth: 50000).",
-              );
-            }
-          })();
-
-          return null;
-        }
-
         return {
-          reply:
-            "*Status order saat ini: Belanja*\nKak, silakan kirim **FOTO STRUK/NOTA** belanjaan jika sudah selesai belanja yah. Saya akan membantu untuk menghitung total tagihan belanjanya.. 😅🙏",
+          reply: await makeCourierReply(
+            "REQUEST_INVOICE_PHOTO",
+            buildCourierContext({
+              courier,
+              order: activeOrder,
+              items: activeOrder.items_summary || [],
+              pickup: activeOrder.pickup_address || "",
+              address: activeOrder.delivery_address || "",
+              notes: uniqueNotesList(activeOrder.order_notes || []),
+              lastMessage: text,
+            }),
+          ),
         };
       }
 
@@ -363,19 +599,52 @@ export const handleCourierMessage = async (
             return n8nImageAction;
           }
 
-          return { reply: "⚠️ Gagal memproses data. Mohon coba lagi." };
+          return {
+            reply: await makeCourierReply(
+              "BILL_CONFIRM_FAILED",
+              buildCourierContext({
+                courier,
+                order: activeOrder,
+                items: activeOrder.items_summary || [],
+                pickup: activeOrder.pickup_address || "",
+                address: activeOrder.delivery_address || "",
+                notes: uniqueNotesList(activeOrder.order_notes || []),
+                lastMessage: text,
+              }),
+            ),
+          };
         } else if (cleanNum.length > 3 && /^\d+$/.test(cleanNum)) {
           const newTotal = parseInt(cleanNum);
           await activeOrder.update({ total_amount: newTotal });
           return {
-            reply: `*Revisi Harga Berhasil*\nTotal Tagihan (setelah di update): *${toIDR(
-              newTotal,
-            )}*.\n\nApakah sudah benar kak? Ketik *OK* / *Y* jika sudah pas/benar.`,
+            reply: await makeCourierReply(
+              "BILL_UPDATED",
+              buildCourierContext({
+                courier,
+                order: activeOrder,
+                items: activeOrder.items_summary || [],
+                pickup: activeOrder.pickup_address || "",
+                address: activeOrder.delivery_address || "",
+                notes: uniqueNotesList(activeOrder.order_notes || []),
+                flags: { total_amount: newTotal },
+                lastMessage: text,
+              }),
+            ),
           };
         }
         return {
-          reply:
-            "Ketik *Y* jika benar, atau ketik *Angka (dalam) Rupiah (Cth: 15000)* untuk revisi.",
+          reply: await makeCourierReply(
+            "BILL_CONFIRM_PROMPT",
+            buildCourierContext({
+              courier,
+              order: activeOrder,
+              items: activeOrder.items_summary || [],
+              pickup: activeOrder.pickup_address || "",
+              address: activeOrder.delivery_address || "",
+              notes: uniqueNotesList(activeOrder.order_notes || []),
+              lastMessage: text,
+            }),
+          ),
         };
       }
 
@@ -383,18 +652,48 @@ export const handleCourierMessage = async (
       else if (activeOrder.status === "BILL_SENT") {
         if (upperText === "#SELESAI") {
           await orderService.completeOrder(activeOrder.order_id, courier.id);
-          await messageService.sendMessage(
-            activeOrder.user_phone,
-            "Terima kasih sudah order di MyJek yah kak! Ditunggu order selanjutnya. 🥰",
-          );
+          const userCompleteReply = await aiService.generateReply({
+            role: "CUSTOMER",
+            status: "ORDER_COMPLETED",
+            context: {
+              role: "CUSTOMER",
+              user_name: "",
+              order_status: "COMPLETED",
+              items: activeOrder.items_summary || [],
+              pickup: activeOrder.pickup_address || "",
+              address: activeOrder.delivery_address || "",
+              notes: uniqueNotesList(activeOrder.order_notes || []),
+            },
+          });
+          await messageService.sendMessage(activeOrder.user_phone, userCompleteReply);
           return {
-            reply:
-              "*ORDER SELESAI!*\nTerima kasih Partner MyJek! Status kembali menjadi *IDLE (ONLINE)*, dan kamu siap menerima order lagi. 😃",
+            reply: await makeCourierReply(
+              "ORDER_COMPLETED_COURIER",
+              buildCourierContext({
+                courier,
+                order: activeOrder,
+                items: activeOrder.items_summary || [],
+                pickup: activeOrder.pickup_address || "",
+                address: activeOrder.delivery_address || "",
+                notes: uniqueNotesList(activeOrder.order_notes || []),
+                lastMessage: text,
+              }),
+            ),
           };
         }
         return {
-          reply:
-            "*Sedang Mengantar*\nTolong Ketik *#SELESAI* jika barang sudah diterima customer yah kak.",
+          reply: await makeCourierReply(
+            "DELIVERY_IN_PROGRESS",
+            buildCourierContext({
+              courier,
+              order: activeOrder,
+              items: activeOrder.items_summary || [],
+              pickup: activeOrder.pickup_address || "",
+              address: activeOrder.delivery_address || "",
+              notes: uniqueNotesList(activeOrder.order_notes || []),
+              lastMessage: text,
+            }),
+          ),
         };
       }
     }
@@ -404,7 +703,11 @@ export const handleCourierMessage = async (
       // Kurir tidak bisa #SIAP jika database belum punya lokasi
       if (!courier.current_latitude || !courier.current_longitude) {
         return {
-          reply: `⛔ *AKSES DITOLAK*\n\nMaaf kak, kamu belum mengirim lokasi saat ini. Sistem tidak bisa memberi order jika tidak tahu posisi Anda.\n\n👉 Klik tombol *Clip (📎)* di WA -> Pilih *Location* -> *Send Your Current Location*.\n\n_Setelah kirim lokasi, baru ketik #SIAP lagi yah kak._ 😅🙏`,
+          reply: await makeCourierReply(
+            "COURIER_LOCATION_REQUIRED",
+            buildCourierContext({ courier, lastMessage: text }),
+            [LOCATION_INSTRUCTION],
+          ),
         };
       }
 
@@ -418,23 +721,90 @@ export const handleCourierMessage = async (
       }
 
       return {
-        reply: `🟢 *STATUS AKTIF*\nSelamat bekerja!\n\n${getDashboardReply(courier)}`,
+        reply: await makeCourierReply(
+          "COURIER_READY",
+          buildCourierContext({ courier, lastMessage: text }),
+        ),
       };
     } else if (upperText === "#OFF") {
       await courier.update({ status: "OFFLINE" });
       await redisClient.sRem("online_couriers", String(courier.id));
-      return { reply: `⛔ *STATUS OFFLINE*\nHati-hati di jalan yah kak. 👋` };
+      return {
+        reply: await makeCourierReply(
+          "COURIER_OFFLINE",
+          buildCourierContext({ courier, lastMessage: text }),
+        ),
+      };
     } else if (upperText.startsWith("#AMBIL")) {
+      if (activeOrder) {
+        return {
+          reply: await makeCourierReply(
+            "COURIER_ALREADY_HAS_ORDER",
+            buildCourierContext({
+              courier,
+              order: activeOrder,
+              items: activeOrder.items_summary || [],
+              pickup: activeOrder.pickup_address || "",
+              address: activeOrder.delivery_address || "",
+              notes: uniqueNotesList(activeOrder.order_notes || []),
+              lastMessage: text,
+            }),
+          ),
+        };
+      }
       // Double check: Jangan sampai ambil order kalau lokasi hilang
       if (!courier.current_latitude || !courier.current_longitude) {
         return {
-          reply: `⛔ *TIDAK BISA AMBIL ORDER*\n\nMaaf kak, data lokasi kamu saat ini masih kosong/belum terupdate. Kakak wajib kirim *Share Location (📎)* sekarang agar bisa mengambil order..`,
+          reply: await makeCourierReply(
+            "COURIER_LOCATION_REQUIRED",
+            buildCourierContext({ courier, lastMessage: text }),
+            [LOCATION_INSTRUCTION],
+          ),
         };
       }
 
-      const orderId = upperText.split(" ")[1];
+      const inputCode = upperText.split(" ")[1];
+      if (!inputCode) {
+        return {
+          reply: await makeCourierReply(
+            "ORDER_TAKE_FAILED",
+            buildCourierContext({
+              courier,
+              lastMessage: text,
+              flags: { error: "Format #AMBIL tidak lengkap." },
+            }),
+          ),
+        };
+      }
+
+      let orderId = inputCode;
+      if (!inputCode.startsWith("ORD-")) {
+        const orderByCode = await Order.findOne({
+          where: { short_code: inputCode, status: "LOOKING_FOR_DRIVER" },
+        });
+        if (!orderByCode) {
+          return {
+            reply: await makeCourierReply(
+              "ORDER_TAKE_FAILED",
+              buildCourierContext({
+                courier,
+                lastMessage: text,
+                flags: { error: "Order tidak ditemukan atau sudah diambil." },
+              }),
+            ),
+          };
+        }
+        orderId = orderByCode.order_id;
+      }
+
       const result = await orderService.takeOrder(orderId, courier.id);
-      if (!result.success) return { reply: `❌ ${result.message}` };
+      if (!result.success)
+        return {
+          reply: await makeCourierReply(
+            "ORDER_TAKE_FAILED",
+            buildCourierContext({ courier, lastMessage: text, flags: { error: result.message } }),
+          ),
+        };
 
       const orderData = result.data;
       const userData = orderData.user;
@@ -442,19 +812,44 @@ export const handleCourierMessage = async (
       const custName = userData ? userData.name : "Pelanggan";
       const custPhone = userData ? userData.phone : orderData.user_phone;
 
-      const detailMsg =
-        `🚀 *ORDER BERHASIL DIAMBIL!*\n\n` +
-        `👤 *Nama Pelanggan:* ${custName}\n` +
-        `📱 *No. WA:* ${custPhone}\n\n` +
-        `📍 *Antar ke:* ${orderData.delivery_address}\n` +
-        `📍 *Ambil di (pickup):* ${orderData.pickup_address}\n` +
-        `📦 *Item:* \n${orderData.items_summary
-          .map((i) => `- ${i.item || "Menu"} (x${i.qty || 1})${i.note ? ` - ${i.note}` : ""}`)
-          .join(", ")}\n\n` +
-        `_Silakan menuju lokasi pengantaran pada lokasi yang sudah diberikan 👇._\n` +
-        `*PENTING*: Selalu Update lokasi terkini kamu kepada saya yah kak, terutama saat sedang aktif (IDLE) ataupun saat menjalankan order pelanggan (👉 Klik tombol *Clip (📎)* di WA -> Pilih *Location* -> *Send Your Current Location*). Terima kasih 👍`;
+      const detailMsg = await makeCourierReply(
+        "ORDER_TAKEN",
+        buildCourierContext({
+          courier,
+          order: orderData,
+          user: userData,
+          items: orderData.items_summary || [],
+          pickup: orderData.pickup_address || "",
+          address: orderData.delivery_address || "",
+          notes: uniqueNotesList(orderData.order_notes || []),
+          flags: {
+            customer_name: userData?.name || "Pelanggan",
+            customer_phone: userData?.phone || orderData.user_phone || "",
+            show_details: true,
+          },
+          lastMessage: text,
+        }),
+        [LOCATION_INSTRUCTION],
+      );
 
       await messageService.sendMessage(courier.phone, detailMsg);
+
+      const userAssignedReply = await aiService.generateReply({
+        role: "CUSTOMER",
+        status: "COURIER_ASSIGNED",
+        context: {
+          role: "CUSTOMER",
+          user_name: userData?.name || "Customer",
+          order_status: orderData.status,
+          items: orderData.items_summary || [],
+          pickup: orderData.pickup_address || "",
+          address: orderData.delivery_address || "",
+          notes: uniqueNotesList(orderData.order_notes || []),
+          courier_name: courier.name,
+          courier_phone: courier.phone,
+        },
+      });
+      await messageService.sendMessage(orderData.user_phone, userAssignedReply);
 
       // Return Object Location untuk n8n
       if (userData && userData.latitude && userData.longitude) {
@@ -468,17 +863,36 @@ export const handleCourierMessage = async (
       } else {
         // Fallback jika user tidak punya koordinat
         return {
-          reply:
-            detailMsg +
-            "\n\n*PENTING:* Maaf kak, koordinat User/Customer tidak tersedia nih. Mohon chat user untuk minta Share Location yah kak. 🙏",
+          reply: await makeCourierReply(
+            "ORDER_TAKEN_NO_LOCATION",
+            buildCourierContext({
+              courier,
+              order: orderData,
+              user: userData,
+              items: orderData.items_summary || [],
+              pickup: orderData.pickup_address || "",
+              address: orderData.delivery_address || "",
+              notes: uniqueNotesList(orderData.order_notes || []),
+              lastMessage: text,
+            }),
+            [LOCATION_INSTRUCTION],
+          ),
         };
       }
     } else if (["#INFO", "MENU", "PING"].includes(upperText)) {
-      return { reply: getDashboardReply(courier) };
+      return {
+        reply: await makeCourierReply(
+          "COURIER_DASHBOARD",
+          buildCourierContext({ courier, lastMessage: text }),
+        ),
+      };
     }
 
     return {
-      reply: `*INFO*\nMaaf kak, perintah tidak saya kenal. Tolong ketik *#INFO* untuk melihat informasi detail kurir.`,
+      reply: await makeCourierReply(
+        "UNKNOWN_COMMAND",
+        buildCourierContext({ courier, lastMessage: text, known_commands: ["#INFO"] }),
+      ),
     };
   } catch (error) {
     console.error("CRITICAL ERROR:", error);

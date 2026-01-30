@@ -8,11 +8,20 @@ const Order = sequelize.define(
       type: DataTypes.STRING(50),
       primaryKey: true,
     },
+    short_code: {
+      type: DataTypes.STRING(12),
+      allowNull: true,
+      unique: true,
+    },
     user_phone: { type: DataTypes.STRING(20), allowNull: false },
     courier_id: { type: DataTypes.UUID, allowNull: true },
 
     raw_message: DataTypes.TEXT,
     items_summary: DataTypes.JSONB,
+    order_notes: {
+      type: DataTypes.JSONB,
+      defaultValue: [],
+    },
 
     invoice_image_url: DataTypes.TEXT,
     total_amount: {

@@ -19,10 +19,28 @@ export const dispatchService = {
     }
 
     // Cek Redis
-    const onlineCourierIds = await redisClient.sMembers("online_couriers");
+    let onlineCourierIds = await redisClient.sMembers("online_couriers");
+
+    // Fallback jika Redis kosong -> ambil dari DB
     if (onlineCourierIds.length === 0) {
-      console.log("TIDAK ADA KURIR ONLINE.");
-      return;
+      const fallbackCouriers = await Courier.findAll({
+        where: {
+          status: "IDLE",
+          is_active: true,
+          current_latitude: { [Op.ne]: null },
+          current_longitude: { [Op.ne]: null },
+        },
+        order: [["last_job_time", "ASC"]],
+        limit: 5,
+      });
+
+      if (!fallbackCouriers.length) {
+        console.log("TIDAK ADA KURIR ONLINE.");
+        return;
+      }
+
+      onlineCourierIds = fallbackCouriers.map((c) => String(c.id));
+      await redisClient.sAdd("online_couriers", onlineCourierIds);
     }
 
     // Filter DB (Status IDLE)
@@ -49,7 +67,7 @@ export const dispatchService = {
     try {
       const items = order.items_summary || [];
       const itemsList = items.map((i) => `- ${i.item} (x${i.qty})`).join("\n");
-      const displayId = order.order_id;
+      const displayId = order.short_code || order.order_id;
 
       // GENERATE MAPS LINK
       // Mengambil koordinat dari User yang terhubung dengan Order

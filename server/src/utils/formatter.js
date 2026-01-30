@@ -1,4 +1,4 @@
-export const formatSummaryReply = (name, items, pickup, address) => {
+export const formatSummaryReply = (name, items, pickup, address, notes = []) => {
   // Jika items kosong/undefined, berikan array kosong
   const validItems = Array.isArray(items) ? items : [];
 
@@ -9,18 +9,26 @@ export const formatSummaryReply = (name, items, pickup, address) => {
   const pickupText = pickup || "_Belum ditentukan_";
   const addressText = address || "_Belum ditentukan_";
 
-  return `Baik Kak ${name}, Berikut detail ordernya:
-  
-🛒 *RINGKASAN PESANAN*
+  const noteLines = Array.isArray(notes)
+    ? notes
+        .map((n) => (typeof n === "string" ? n : n?.note))
+        .filter(Boolean)
+        .map((n) => `- ${n}`)
+        .join("\n")
+    : "";
+
+  const noteSection = noteLines ? `\n\nCatatan:\n${noteLines}` : "";
+
+  return `Siap kak ${name} 😊
+Pesanan sudah lengkap dan siap diproses ya 👍
+
+📦 *Detail Pesanan:*
 ${itemList || "- _Belum ada menu_"}
-  
-📍 *Ambil:* ${pickupText}
-🏁 *Antar:* ${addressText}
-  
-Apakah data ini sudah benar? 
-👉 Balas *YA/Ya* untuk lanjutkan order dan mencari kurir.
-👉 Balas *Detail Revisi* jika ada yang salah atau ada perubahan data order.
-👉 Balas *Batal* jika ingin membatalkan pesanan.`;
+
+📍 *Antar ke:* ${addressText}
+📍 *Pickup dari:* ${pickupText}${noteSection}
+
+Mohon konfirmasi dulu pesanannya kak apakah sudah sesuai? 🙏`;
 };
 
 export const getStatusMessage = (status) => {

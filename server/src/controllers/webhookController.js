@@ -9,6 +9,24 @@ import logger from "../utils/logger.js";
 
 const sanitizeId = (id) => (id ? id.split("@")[0] : "");
 
+const buildPhoneCandidates = (rawPhone) => {
+  const candidates = new Set();
+  if (!rawPhone) return [];
+
+  const rawDigits = rawPhone.toString().replace(/[^0-9]/g, "");
+  if (rawDigits) candidates.add(rawDigits);
+
+  const normalized = sanitizePhoneNumber(rawPhone);
+  if (normalized) {
+    candidates.add(normalized);
+    if (normalized.startsWith("62")) {
+      candidates.add(`0${normalized.slice(2)}`);
+    }
+  }
+
+  return Array.from(candidates);
+};
+
 // STANDARD N8N RESPONSE (TEXT)
 const createN8nResponse = (to, body) => {
   return {
@@ -108,19 +126,90 @@ export const handleIncomingMessage = async (req, res) => {
     const testModeKey = `test_mode:${senderIdClean}`;
     const testMode = await redisClient.get(testModeKey); // "USER" atau "COURIER"
 
+    // LOGIN KURIR (BISA DIPANGGIL DI PRODUCTION / NON-TEST MODE)
+    if (upperBody.startsWith("#LOGIN")) {
+      const inputPhone = upperBody.replace("#LOGIN", "").trim();
+      const cleanPhone = sanitizePhoneNumber(inputPhone);
+
+      if (!cleanPhone) {
+        return res.json(
+          createN8nResponse(
+            rawSenderId,
+            "Maaf kak, Format Login salah. Silahkan gunakan/ketik: #LOGIN <Nomor HP> (Contoh: #LOGIN 08912345678)",
+          ),
+        );
+      }
+
+      const courierCandidates = buildPhoneCandidates(cleanPhone);
+      const courierCandidate = await Courier.findOne({
+        where: { phone: { [Op.in]: courierCandidates } },
+      });
+
+      if (!courierCandidate) {
+        return res.json(
+          createN8nResponse(
+            rawSenderId,
+            `Nomor ${inputPhone} tidak terdaftar sebagai kurir. Silahkan hubungi admin.`,
+          ),
+        );
+      }
+
+      const isDifferentDevice =
+        courierCandidate.device_id && courierCandidate.device_id !== rawSenderId;
+      const isCurrentlyOnline = courierCandidate.status && courierCandidate.status !== "OFFLINE";
+
+      if (isDifferentDevice && isCurrentlyOnline) {
+        return res.json(
+          createN8nResponse(
+            rawSenderId,
+            "Akun kurir ini sudah aktif di perangkat lain. Silahkan hubungi admin jika perlu ganti perangkat.",
+          ),
+        );
+      }
+
+      await courierCandidate.update({
+        device_id: rawSenderId,
+        status: "IDLE",
+        is_active: true,
+      });
+      await redisClient.sAdd("online_couriers", String(courierCandidate.id));
+      await redisClient.del(testModeKey);
+
+      return res.json(
+        createN8nResponse(
+          rawSenderId,
+          `✅ LOGIN BERHASIL!\nHalo ${courierCandidate.name}, akun kamu sudah aktif nih. Silahkan ditunggu ordernya masuk yah 😃🙏`,
+        ),
+      );
+    }
+
     // IDENTIFIKASI PERAN
+    const senderPhoneCandidates = buildPhoneCandidates(senderIdClean);
     let courier = await Courier.findOne({
       where: {
-        [Op.or]: [{ phone: senderIdClean }, { device_id: rawSenderId }],
+        [Op.or]: [
+          { phone: { [Op.in]: senderPhoneCandidates } },
+          { device_id: rawSenderId },
+        ],
       },
     });
 
     let isActingAsCourier = false;
-    if (courier) {
-      if (testMode === "USER") isActingAsCourier = false;
-      else isActingAsCourier = true;
-    } else {
-      if (testMode === "COURIER") isActingAsCourier = true;
+    if (testMode === "COURIER") {
+      isActingAsCourier = true;
+      if (!courier) {
+        const testUser = await User.findOne({ where: { device_id: rawSenderId } });
+        if (testUser) {
+          const testUserCandidates = buildPhoneCandidates(testUser.phone);
+          courier = await Courier.findOne({
+            where: { phone: { [Op.in]: testUserCandidates } },
+          });
+        }
+      }
+    } else if (testMode === "USER") {
+      isActingAsCourier = false;
+    } else if (courier) {
+      isActingAsCourier = true;
     }
 
     // ROUTING FLOW
@@ -204,7 +293,12 @@ export const handleIncomingMessage = async (req, res) => {
 
       // Identifikasi User & Registrasi
       let existingUser = await User.findOne({
-        where: { [Op.or]: [{ phone: senderIdClean }, { device_id: rawSenderId }] },
+        where: {
+          [Op.or]: [
+            { phone: { [Op.in]: senderPhoneCandidates } },
+            { device_id: rawSenderId },
+          ],
+        },
       });
 
       if (!existingUser && sanitizePhoneNumber(messageBody)) {
@@ -214,13 +308,13 @@ export const handleIncomingMessage = async (req, res) => {
           await User.create({ name: senderName, phone: phoneInput, device_id: rawSenderId });
           n8nResponse = createN8nResponse(
             rawSenderId,
-            `✅ REGISTRASI BERHASIL!\nSalam kenal Kak ${senderName}. Selamat datang di MyJekID - Aplikasi pesan antar melalui chat WA, Mau order atau pesan apa hari ini kak? 😃🙏`,
+            `✅ Registrasi berhasil!\nSalam kenal Kak ${senderName}. Selamat datang di MyJek. Mau pesan apa hari ini? 😃🙏`,
           );
         } else {
           await existingUser.update({ device_id: rawSenderId });
           n8nResponse = createN8nResponse(
             rawSenderId,
-            `✅ Akun terhubung kembali. Mau order apa hari ini nih kak.. 😃🙏`,
+            `✅ Akun terhubung kembali. Mau pesan apa hari ini kak? 😃🙏`,
           );
         }
       } else {
@@ -312,13 +406,39 @@ export const handleIncomingMessage = async (req, res) => {
           }
 
           // Format Response ke N8N
-          if (userReply?.reply) n8nResponse = createN8nResponse(rawSenderId, userReply.reply);
-          else if (userReply?.action) n8nResponse = userReply;
+          if (userReply?.action === "handoff") {
+            const pauseDuration = 30 * 60 * 1000;
+            const pauseUntil = new Date(Date.now() + pauseDuration);
+            await session.update({ mode: "HUMAN", is_paused_until: pauseUntil });
+
+            await createSystemNotification(req.io, {
+              title: "SYSTEM HANDOFF: Bot Dialihkan ke HUMAN",
+              message: `Bot mengalami kendala pada percakapan user ${existingUser.phone}. Mode dialihkan ke HUMAN selama 30 menit.`,
+              type: "HUMAN_HANDOFF",
+              referenceId: existingUser.phone,
+              actionUrl: `/dashboard/chat`,
+              extraData: { userName: existingUser.name || "User" },
+            });
+
+            n8nResponse = createN8nResponse(rawSenderId, userReply.reply);
+          } else if (userReply?.type === "location") {
+            n8nResponse = createN8nLocationResponse(
+              rawSenderId,
+              userReply.latitude,
+              userReply.longitude,
+              userReply.address,
+              userReply.reply || "",
+            );
+          } else if (userReply?.reply) {
+            n8nResponse = createN8nResponse(rawSenderId, userReply.reply);
+          } else if (userReply?.action) {
+            n8nResponse = userReply;
+          }
         } else {
           // User Belum Terdaftar
           n8nResponse = createN8nResponse(
             rawSenderId,
-            `👋 Halo Kak! Mohon verifikasi nomor HP dulu yah sebelum lanjut order. Ketik: <No_HP> (Contoh: 08123456789).`,
+            `👋 Halo Kak! Selamat datang di MyJek, aplikasi pesan - antar online 😃. \n\nKarena ini pertama kali chat, mohon kirim nomor HP dulu ya.\nContohnya ketik: 08123456789`,
           );
         }
       }
@@ -339,29 +459,45 @@ export const handleIncomingMessage = async (req, res) => {
         // Update Mode ke HUMAN di Database
         // Kita cari atau buat sesi darurat jika belum ada
         let session = await ChatSession.findOne({ where: { phone } });
-
-        // Hanya lakukan handoff jika mode saat ini masih BOT
-        if (session && session.mode === "BOT") {
-          await session.update({
-            mode: "HUMAN",
-            is_paused_until: null, // Reset pause agar admin bisa langsung masuk
+        if (!session) {
+          session = await ChatSession.create({
+            phone,
+            user_name: "User",
+            mode: "BOT",
+            last_interaction: new Date(),
           });
-
-          // Kirim Notifikasi & Email ke Admin
-          await createSystemNotification(req.io, {
-            title: "SYSTEM CRASH: Bot Gagal Memproses Pesan!",
-            message: `Terjadi error kritis pada Bot: "${error.message}". Mode otomatis dialihkan ke HUMAN untuk user ${phone}. Segera lakukan tindakan atau chat user tersebut untuk dibantu!`,
-            type: "HUMAN_HANDOFF",
-            referenceId: phone,
-            actionUrl: `/dashboard/chat`,
-            extraData: { userName: session.user_name || "User" },
-          });
-
-          logger.info(`Emergency Handoff triggered for ${phone}`);
         }
+
+        const pauseDuration = 30 * 60 * 1000;
+        const pauseUntil = new Date(Date.now() + pauseDuration);
+        await session.update({
+          mode: "HUMAN",
+          is_paused_until: pauseUntil,
+        });
+
+        // Kirim Notifikasi & Email ke Admin
+        await createSystemNotification(req.io, {
+          title: "SYSTEM CRASH: Bot Gagal Memproses Pesan!",
+          message: `Terjadi error kritis pada Bot: "${error.message}". Mode otomatis dialihkan ke HUMAN untuk user ${phone}. Segera lakukan tindakan atau chat user tersebut untuk dibantu!`,
+          type: "HUMAN_HANDOFF",
+          referenceId: phone,
+          actionUrl: `/dashboard/chat`,
+          extraData: { userName: session.user_name || "User" },
+        });
+
+        logger.info(`Emergency Handoff triggered for ${phone}`);
       }
     } catch (innerError) {
       console.error("Gagal menjalankan Safety Net:", innerError);
+    }
+    const rawId = req.body?.payload?.from || req.body?.payload?.chatId || "";
+    if (rawId) {
+      return res.status(200).json(
+        createN8nResponse(
+          rawId,
+          "Maaf kak, sistem kami sedang mengalami kendala. Percakapan ini kami alihkan ke admin (mode HUMAN) selama 30 menit ya. Mohon tunggu sebentar 🙏",
+        ),
+      );
     }
     return res.status(200).json({ status: "error", message: "Error handled gracefully" });
   }

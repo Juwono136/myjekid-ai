@@ -53,13 +53,13 @@ class OpenAiAdapter {
           content: [
             {
               type: "text",
-              text: `${prompt}. RETURN JSON ONLY: { "total": number }. Contoh: { "total": 50000 }. Jika tidak terbaca/gagal, return { "total": 0 }.`,
+              text: `${prompt}. RETURN JSON ONLY with keys: { "total_tagihan": number, "total_bayar": number, "grand_total": number, "total_belanja": number }. Gunakan 0 jika tidak ada. Contoh: { "total_tagihan": 50000, "total_bayar": 0, "grand_total": 0, "total_belanja": 0 }.`,
             },
             {
               type: "image_url",
               image_url: {
                 url: `data:${mimeType};base64,${base64Data}`,
-                detail: "low", // (Fixed ~85 tokens)
+                detail: "high",
               },
             },
           ],
@@ -79,13 +79,10 @@ class OpenAiAdapter {
 
       const resultObj = JSON.parse(rawContent);
 
-      // Normalisasi output (kadang AI return total_amount, kadang total)
-      const finalAmount = resultObj.total || resultObj.total_amount || resultObj.amount || 0;
-
-      return parseInt(finalAmount);
+      return resultObj;
     } catch (error) {
       console.error("[OpenAI Vision] Error:", error.message);
-      return 0;
+      return { total_tagihan: 0, total_bayar: 0, grand_total: 0, total_belanja: 0 };
     }
   }
 }

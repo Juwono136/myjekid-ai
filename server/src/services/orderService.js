@@ -5,9 +5,11 @@ class OrderService {
   async createFromAI(userPhone, aiData) {
     try {
       const orderId = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const shortCode = await this.generateShortCode();
 
       const newOrder = await Order.create({
         order_id: orderId,
+        short_code: shortCode,
         user_phone: userPhone,
         raw_message: aiData.original_message || "Order from Bot",
         items_summary: aiData.items,
@@ -23,6 +25,19 @@ class OrderService {
       console.error("❌ Create Order Error:", error);
       throw error;
     }
+  }
+
+  async generateShortCode() {
+    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      let code = "";
+      for (let i = 0; i < 4; i += 1) {
+        code += alphabet[Math.floor(Math.random() * alphabet.length)];
+      }
+      const exists = await Order.findOne({ where: { short_code: code } });
+      if (!exists) return code;
+    }
+    return `K${Math.floor(1000 + Math.random() * 9000)}`;
   }
 
   // KURIR MENGAMBIL ORDER
