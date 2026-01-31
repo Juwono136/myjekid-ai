@@ -4,6 +4,21 @@ import { messageService } from "./messageService.js";
 import { redisClient } from "../config/redisClient.js";
 
 export const dispatchService = {
+  async offerPendingOrdersToCourier(courier, limit = 3) {
+    if (!courier || courier.status !== "IDLE" || courier.is_active === false) return false;
+    const pendingOrders = await Order.findAll({
+      where: { status: "LOOKING_FOR_DRIVER" },
+      include: [{ model: User, as: "user" }],
+      order: [["created_at", "ASC"]],
+      limit,
+    });
+    if (!pendingOrders.length) return false;
+
+    for (const order of pendingOrders) {
+      await this.offerOrderToCourier(order, courier);
+    }
+    return true;
+  },
   // CARI DRIVER
   async findDriverForOrder(orderId) {
     console.log(`🔍 Dispatching Order #${orderId}...`);
@@ -82,8 +97,7 @@ export const dispatchService = {
 
       const message =
         `🔔 *ORDER BARU MASUK!* 🔔\n\n` +
-        `🆔 *Order ID:*\n` +
-        `${displayId}\n\n` +
+        `🆔 *Order ID:* ${displayId}\n\n` +
         `📦 *Item:*\n${itemsList}\n\n` +
         `📍 *Ambil:* ${order.pickup_address}\n` +
         `🏁 *Antar:* ${order.delivery_address} (*Link Maps:* ${mapsLink}\n\n` +

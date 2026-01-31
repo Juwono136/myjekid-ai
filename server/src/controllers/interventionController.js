@@ -21,6 +21,13 @@ const wahaClient = axios.create({
   },
 });
 
+const applyNoCache = (res) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.set("Pragma", "no-cache");
+  res.set("Expires", "0");
+  res.set("Surrogate-Control", "no-store");
+};
+
 // Kirim pesan dari admin ke user
 export const sendMessageToUser = async (req, res, next) => {
   try {
@@ -128,6 +135,7 @@ export const toggleSessionMode = async (req, res, next) => {
 // Ambil daftar user aktif
 export const getActiveSessions = async (req, res, next) => {
   try {
+    applyNoCache(res);
     const { search = "" } = req.query;
 
     // Tampilkan semua sesi
@@ -177,12 +185,14 @@ export const getActiveSessions = async (req, res, next) => {
 // Ambil history chat
 export const getChatHistory = async (req, res, next) => {
   try {
+    applyNoCache(res);
     const { phone } = req.params;
     const { limit = 50 } = req.query;
     const chatId = phone.endsWith("@c.us") ? phone : `${phone}@c.us`;
 
     const response = await wahaClient.get("/api/messages", {
       params: {
+        session: "default",
         chatId: chatId,
         limit: limit,
         downloadMedia: false,
@@ -201,6 +211,13 @@ export const getChatHistory = async (req, res, next) => {
 
     res.status(200).json({ status: "success", data: formattedMessages });
   } catch (error) {
-    res.status(200).json({ status: "success", data: [] });
+    const wahaError = error.response?.data
+      ? JSON.stringify(error.response.data)
+      : "no-response-body";
+    logger.error(`Failed to fetch chat history: ${error.message} | ${wahaError}`);
+    res.status(502).json({
+      status: "error",
+      message: "Gagal mengambil history chat dari WhatsApp gateway.",
+    });
   }
 };

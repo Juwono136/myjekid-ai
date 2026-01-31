@@ -153,6 +153,7 @@ const executeBillFinalization = async (courier, orderId) => {
         flags: { show_details: true },
         last_message: "",
       },
+      required_phrases: [`Total tagihan: Rp${finalTotal.toLocaleString("id-ID")}`],
     });
 
     const courierMsg = await aiService.generateReply({
@@ -204,6 +205,7 @@ export const handleCourierLocation = async (courier, lat, lng, io) => {
     if (courier.status === "OFFLINE") {
       await courier.update({ status: "IDLE", is_active: true });
       await redisClient.sAdd("online_couriers", String(courier.id));
+      await dispatchService.offerPendingOrdersToCourier(courier);
     }
 
     console.log(`DB Updated: ${courier.name} -> [${lat}, ${lng}]`);
@@ -431,6 +433,7 @@ export const handleCourierMessage = async (
         is_active: true,
       });
       await redisClient.sAdd("online_couriers", String(courier.id));
+      await dispatchService.offerPendingOrdersToCourier(courier);
       return {
         reply: await makeCourierReply(
           "COURIER_READY",
@@ -714,9 +717,8 @@ export const handleCourierMessage = async (
       await courier.update({ status: "IDLE", last_active_at: new Date() });
       await redisClient.sAdd("online_couriers", String(courier.id));
 
-      const pendingOrder = await Order.findOne({ where: { status: "LOOKING_FOR_DRIVER" } });
-      if (pendingOrder) {
-        await dispatchService.offerOrderToCourier(pendingOrder, courier);
+      const offered = await dispatchService.offerPendingOrdersToCourier(courier);
+      if (offered) {
         return;
       }
 
@@ -748,6 +750,18 @@ export const handleCourierMessage = async (
               address: activeOrder.delivery_address || "",
               notes: uniqueNotesList(activeOrder.order_notes || []),
               lastMessage: text,
+            }),
+          ),
+        };
+      }
+      if (courier.status !== "IDLE" || courier.is_active === false) {
+        return {
+          reply: await makeCourierReply(
+            "ORDER_TAKE_FAILED",
+            buildCourierContext({
+              courier,
+              lastMessage: text,
+              flags: { error: "Status kamu belum online. Ketik #SIAP dulu ya." },
             }),
           ),
         };

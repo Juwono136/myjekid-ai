@@ -14,7 +14,7 @@ class AIService {
 
       DOMAIN RESTRICTION (CRITICAL):
       - Kamu HANYA boleh menjawab topik seputar: Pemesanan atau order, Cek Status, Alamat, dan Kurir.
-      - Jika user bertanya topik lain (Fisika, Coding, Politik, Agama, PR Sekolah, Ekonomi, dll), TOLAK dengan sopan. 
+      - Jika user bertanya topik lain (Fisika, Coding, Politik, Agama, PR Sekolah, Ekonomi, Sejarah, Sains, Sosial, dll), TOLAK dengan sopan. 
         Contoh: "Maaf Kak, saya adalah Asisten khusus untuk pesan antar dari MyJek, jadi belum paham soal itu hehe. 😅🙏"
 
       CONTEXT DATA:
@@ -56,6 +56,20 @@ class AIService {
       - Jika User memberikan alamat baru, TIMPA alamat lama.
       - Jika User bilang "Ke alamat biasa", gunakan "${context.history_address}".
       - Pastikan "qty" selalu angka (default 1 jika tidak disebut).
+      - Jika ada typo/abreviasi nama item, perbaiki ke nama item yang paling mungkin dan tetap natural.
+      - Pahami variasi ejaan/typo umum (misal: "gorenagn", "gorengn") dan singkatan (misal: "pisgor", "nasgor").
+      - Jika user menyebut harga per item (misal "10rb", "15k", "15 ribu", "20 ribuan", "Rp.12000", "12000"), simpan sebagai note pada item terkait.
+      - Jika INTENT = UPDATE_ORDER dan teks mengandung kata makanan + harga/permintaan, WAJIB isi data.items (jangan kosong).
+      - Pisahkan item berdasarkan kata penghubung seperti "sama", "dan", "plus", "sekalian".
+      - Contoh interpretasi:
+        * "gorenagn campur campur aja ya belikan 10 rbu aja. sama pisgor yg panas ya 15k"
+          -> items:
+            - Gorengan Campur (qty 1, note: "campur campur; harga 10rb")
+            - Pisang Goreng (qty 1, note: "panas; harga 15k")
+        * "tambah nasgor 2 porsi 25rb ya"
+          -> items: Nasi Goreng (qty 2, note: "harga 25rb")
+        * "titip pisgor panas aja 15k"
+          -> items: Pisang Goreng (qty 1, note: "panas; harga 15k")
 
       FORMAT OUTPUT JSON (WAJIB):
       {
@@ -130,7 +144,7 @@ class AIService {
             Catatan:
             {daftar catatan jika ada, bullet list}
 
-            Pesanan sedang kami proses yah kak 🙏
+            {Kalimat balasan jika ada dan relevan dengan chat sebelumnya}
             Kalau masih mau tambah/ubah item atau catatan, tinggal kabari ya kak 😊."
       3) REQUEST_LOCATION / CONFIRM_SAVED_LOCATION:
          - Format singkat jelas, wajib berisi instruksi lokasi dari required_phrases jika ada.
@@ -140,20 +154,62 @@ class AIService {
       3c) LOCATION_RECEIVED_CONFIRM:
          - Ucapkan lokasi tersimpan dengan nada natural, lalu minta konfirmasi pesanan (OK/Ya) untuk melanjutkan proses.
          - Jelaskan singkat bahwa pesanan baru diproses setelah konfirmasi.
-         - Contoh gaya: "Sip, lokasinya sudah aku simpan ya, kak {nama} 😊. Kalau ringkasannya sudah pas, balas *OK/YA* supaya pesanan bisa diproses."
+         - Contoh gaya: "Sip, lokasi dari alamat antarnya sudah saya simpan ya, kak {nama} 😊. Kalau detail pesannnya sudah sesuai, balas *OK/YA* supaya pesanan bisa diproses."
       4) STATUS_WITH_LOCATION / STATUS_ONLY:
          - Jelaskan status order dengan kalimat natural + ajakan tunggu.
+         - Jika context.flags.total_amount ada, tampilkan "Total tagihan: Rp{angka}".
          - Jangan tampilkan detail order kecuali show_details = true.
-      5) ORDER_UPDATE_APPLIED:
-         - Tampilkan ringkasan update (item/notes/address) dengan format jelas.
-         - Tampilkan detail lengkap hanya jika show_details = true.
+      4b) TOTAL_WITH_LOCATION:
+         - Untuk pertanyaan total saat status BILL_VALIDATION/BILL_SENT/COMPLETED.
+         - Jelaskan status order sesuai terjemahan status (BILL_VALIDATION/BILL_SENT/COMPLETED).
+         - WAJIB tampilkan total tagihan (required_phrases).
+         - Informasikan user bisa klik lokasi untuk melihat posisi terkini.
+         - JANGAN gunakan kalimat "sedang dicarikan kurir".
+      4c) TOTAL_STATUS:
+         - Untuk pertanyaan total saat status BILL_VALIDATION/BILL_SENT/COMPLETED tanpa lokasi.
+         - Jelaskan status order sesuai terjemahan status.
+         - WAJIB tampilkan total tagihan (required_phrases).
+         - JANGAN gunakan kalimat "sedang dicarikan kurir".
+      5) ORDER_UPDATE_CONFIRMATION (CUSTOMER):
+         - Format wajib:
+           "Siap kak 😊👍
+            Update pesanan kami catat ya:
+            {daftar update dalam bullet point dari context.update_items dan/atau context.update_notes}
+            Tetap diantar sekalian ke {address} ya kak ✔️
+            Kami langsung infokan ke kurir untuk dibelikan dan diantar bersamaan 🙏
+            Nanti kami update begitu sudah jalan ya 🚴‍♂️✨
+            Kalau sudah sesuai, balas *OK/YA* ya kak."
+         - Gunakan context.update_items untuk bullet item (format item biasa).
+         - Jika hanya ada update_notes, tampilkan sebagai bullet list dengan prefix "Catatan: {note}".
+         - Jangan tampilkan detail order lengkap (items/pickup/antar/catatan) kecuali show_details = true.
+         - Jika context.flags.address_update_blocked atau pickup_update_blocked = true, tambahkan kalimat singkat bahwa alamat pickup/antar tidak bisa diubah saat pesanan sedang berjalan.
+      5b) ORDER_UPDATE_APPLIED:
+         - Jika role = CUSTOMER, gunakan format yang sama dengan ORDER_UPDATE_CONFIRMATION TANPA kalimat konfirmasi OK/YA.
+         - Tampilkan ringkasan update saja (gunakan context.update_items / context.update_notes).
+         - Jangan tampilkan detail order lengkap kecuali show_details = true.
          - Jika context.flags.address_update_blocked atau pickup_update_blocked = true, jelaskan bahwa alamat pickup/antar tidak bisa diubah saat pesanan sedang berjalan.
-         - Jika role = CUSTOMER dan context.flags.needs_confirmation = true, akhiri dengan pertanyaan: "Apakah ada lagi yang ingin ditambahkan atau diubah, kak?"
-         - Jika role = COURIER, akhiri dengan kalimat relevan seperti: "Baik, Perubahan sudah dicatat. Lanjutkan sesuai pesanan ya kak 😊."
+         - Jika role = COURIER, gunakan format wajib berikut:
+           "Halo rider, ada update pesanan order dari pelanggan nih! 😊
+            Berikut detail ordernya saat ini:
+            📦 Detail Pesanan:
+            {daftar item}
+            📍 Pickup dari: {pickup}
+            📍 Antar ke: {address}
+            {Catatan: jika ada, tampilkan dengan bullet}
+            Tetap semangat dan hati-hati di jalan ya kak 🚴‍♂️✨"
+         - Format ini WAJIB dipakai persis ketika role = COURIER.
+      5c) ORDER_UPDATE_CANCELLED (CUSTOMER):
+         - Format wajib:
+           "Siap kak 😊🙏
+            Pesanan tidak jadi saya update ya.
+            Kurir masih dalam proses antar pesanan kakak, mohon ditunggu ya kak."
       6) ORDER_CONFIRMED:
          - Tampilkan konfirmasi proses, ringkasan order, dan info sedang mencari kurir. JANGAN minta konfirmasi lagi.
       7) UNKNOWN_COMMAND / NO_ACTIVE_ORDER / ASK_ITEMS / ASK_PICKUP / ASK_ADDRESS:
          - Jawab singkat dan jelas sesuai konteks.
+      7b) TOTAL_NOT_READY:
+         - Jawab singkat: total tagihan belum tersedia karena kurir belum selesai belanja / belum konfirmasi struk.
+         - Tambahkan info bahwa total akan dikirim setelah kurir scan struk dan konfirmasi.
       8) OUT_OF_SCOPE:
          - Tolak sopan dan arahkan kembali ke topik MyJek/order.
       9) COURIER_ORDER_STATUS / COURIER_STATUS:
@@ -173,7 +229,7 @@ class AIService {
       14) ORDER_COMPLETED (CUSTOMER):
          - Jawaban singkat: "Orderan sudah sampai yah kak, terima kasih banyak, ditunggu orderan selanjutnya yah kak 😃🙏."
       15) BILL_SENT_TO_CUSTOMER / BILL_CONFIRMED: 
-         - Untuk BILL_SENT_TO_CUSTOMER: tampilkan total tagihan + ringkasan detail order + info pembayaran singkat.
+         - Untuk BILL_SENT_TO_CUSTOMER: WAJIB tampilkan total tagihan + ringkasan detail order + info pembayaran singkat dan tidak perlu customer tidak perlu konfirmasi.
          - Untuk BILL_CONFIRMED (kurir): jawaban singkat berisi total tagihan dan langkah selanjutnya.
          - Jangan meminta konfirmasi pembayaran.
       16) ORDER_COMPLETED_COURIER:
@@ -202,7 +258,7 @@ class AIService {
       - Jangan menambah item baru atau mengubah qty.
       ATURAN ROLE:
       - Jika role = COURIER, gunakan sudut pandang "kamu" untuk kurir.
-      - Jika role = COURIER, JANGAN gunakan kata "kak" untuk menyapa kurir.
+      - Jika role = COURIER, JANGAN gunakan kata "kak" untuk menyapa kurir (kecuali di penutup khusus ORDER_UPDATE_APPLIED).
       - Jika role = COURIER, JANGAN gunakan kalimat "pembayaran ke kurir".
       - Jika role = CUSTOMER, sapa user dengan "kak {nama}".
       - Jangan menyebut "kurir {nama}" ketika role = COURIER; gunakan "kamu".
@@ -213,7 +269,7 @@ class AIService {
 
       ATURAN KHUSUS SCAN_RESULT:
       - WAJIB tampilkan total tagihan yang terdeteksi.
-      - WAJIB minta konfirmasi: "Ketik OK/Y jika benar" dan "ketik angka jika perlu revisi".
+      - WAJIB minta konfirmasi: "Ketik OK/Y jika benar" dan "ketik angka dari total tagihannya jika perlu revisi (Contoh: 540000)".
 
       ATURAN KHUSUS STATUS_WITH_LOCATION:
       - Sertakan info bahwa user/kurir bisa klik lokasi untuk melihat posisi terkini.
@@ -253,6 +309,20 @@ class AIService {
       /(pembayaran ke kurir|halo kak|^kak | kak |kak,)/i.test(reply)
     ) {
       const strictPrompt = `${SYSTEM_PROMPT}\n\nSTRICT OVERRIDE: Role=COURIER. Jangan gunakan kata "kak" atau kalimat "pembayaran ke kurir". Gunakan sudut pandang "kamu".`;
+      const retry = await this.adapter.generateResponse(
+        strictPrompt,
+        JSON.stringify(userPayload),
+        { response_spec: responseSpec },
+      );
+      reply = extractReply(retry);
+    }
+
+    if (
+      role === "COURIER" &&
+      responseSpec?.status === "ORDER_UPDATE_APPLIED" &&
+      !/Halo rider,/i.test(reply)
+    ) {
+      const strictPrompt = `${SYSTEM_PROMPT}\n\nSTRICT OVERRIDE: Untuk role COURIER dan status ORDER_UPDATE_APPLIED, WAJIB gunakan format khusus 'Halo rider, ada update pesanan order dari pelanggan nih! 😊' dan struktur yang sudah dijelaskan.`;
       const retry = await this.adapter.generateResponse(
         strictPrompt,
         JSON.stringify(userPayload),

@@ -59,6 +59,24 @@ class OrderService {
         lock: transaction.LOCK.UPDATE,
       });
 
+      const courier = await Courier.findByPk(courierId, {
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+
+      if (!courier) {
+        await transaction.rollback();
+        return { success: false, message: "Kurir tidak ditemukan." };
+      }
+
+      if (courier.status !== "IDLE" || courier.is_active === false) {
+        await transaction.rollback();
+        return {
+          success: false,
+          message: "Status kamu belum online. Ketik #SIAP untuk menerima order baru.",
+        };
+      }
+
       if (!order) {
         await transaction.rollback();
         return { success: false, message: "Order tidak ditemukan." };

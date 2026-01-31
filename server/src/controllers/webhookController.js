@@ -2,6 +2,7 @@ import { Op } from "sequelize";
 import { User, Courier, ChatSession, TrainingData } from "../models/index.js";
 import { handleUserMessage } from "../services/flows/userFlow.js";
 import { handleCourierMessage } from "../services/flows/courierFlow.js";
+import { dispatchService } from "../services/dispatchService.js";
 import { redisClient } from "../config/redisClient.js";
 import { sanitizePhoneNumber } from "../utils/formatter.js";
 import { createSystemNotification } from "./notificationController.js";
@@ -174,6 +175,7 @@ export const handleIncomingMessage = async (req, res) => {
       });
       await redisClient.sAdd("online_couriers", String(courierCandidate.id));
       await redisClient.del(testModeKey);
+      await dispatchService.offerPendingOrdersToCourier(courierCandidate);
 
       return res.json(
         createN8nResponse(
@@ -245,6 +247,7 @@ export const handleIncomingMessage = async (req, res) => {
         await courierCandidate.update({ device_id: rawSenderId, status: "IDLE", is_active: true });
         await redisClient.sAdd("online_couriers", String(courierCandidate.id));
         await redisClient.del(testModeKey);
+        await dispatchService.offerPendingOrdersToCourier(courierCandidate);
 
         return res.json(
           createN8nResponse(

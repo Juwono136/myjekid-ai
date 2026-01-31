@@ -3,6 +3,8 @@ import { Op } from "sequelize";
 import AppError from "../utils/AppError.js";
 import logger from "../utils/logger.js";
 import { sanitizePhoneNumber } from "../utils/formatter.js";
+import { dispatchService } from "../services/dispatchService.js";
+import { redisClient } from "../config/redisClient.js";
 
 // Get all couriers
 export const getAllCouriers = async (req, res, next) => {
@@ -129,6 +131,7 @@ export const updateCourier = async (req, res, next) => {
 
     const courier = await Courier.findByPk(id);
     if (!courier) return next(new AppError("Kurir tidak ditemukan", 404));
+    const previousStatus = courier.status;
 
     // Update Name
     if (name) courier.name = name;
@@ -161,6 +164,17 @@ export const updateCourier = async (req, res, next) => {
     }
 
     await courier.save();
+
+    if (status) {
+      if (courier.status === "IDLE") {
+        await redisClient.sAdd("online_couriers", String(courier.id));
+        if (previousStatus !== "IDLE") {
+          await dispatchService.offerPendingOrdersToCourier(courier);
+        }
+      } else {
+        await redisClient.sRem("online_couriers", String(courier.id));
+      }
+    }
 
     logger.info(`Courier data updated: ${courier.name} (ID: ${id})`);
 
