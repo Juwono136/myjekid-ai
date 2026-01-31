@@ -241,7 +241,7 @@ export const handleCourierMessage = async (
 ) => {
   try {
     const LOCATION_INSTRUCTION =
-      "*Penting:* Sebelum lanjut untuk menerima order, tolong update dulu koordinat lokasinya yah kak, agar saya bisa carikan order aktif yang terdekat dengan kakak.\n\nSilahkan klik tombol Clip (📎) di WA -> Pilih Location -> Send Your Current Location.\n\nTerima kasih, semangat kak!😃👍";
+      "*Penting:* Sebelum lanjut untuk menerima order, Jika belum update lokasi, tolong update dulu koordinat lokasinya yah kak, agar saya bisa carikan order aktif yang terdekat dengan kakak.\n\nSilahkan klik tombol Clip (📎) di WA -> Pilih Location -> Send Your Current Location.\n\nTerima kasih, semangat kak!😃👍";
     const makeCourierReply = async (status, context, required_phrases = []) =>
       await buildCourierReply({
         role: "COURIER",

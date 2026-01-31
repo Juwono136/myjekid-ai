@@ -1,4 +1,4 @@
-import { Courier } from "../models/index.js";
+import { Courier, Order } from "../models/index.js";
 import { Op } from "sequelize";
 import AppError from "../utils/AppError.js";
 import logger from "../utils/logger.js";
@@ -152,7 +152,34 @@ export const updateCourier = async (req, res, next) => {
     }
 
     if (shift_code) courier.shift_code = shift_code;
-    if (status) courier.status = status;
+    if (status) {
+      const allowedStatuses = ["OFFLINE", "SUSPEND"];
+      if (!allowedStatuses.includes(status)) {
+        return next(new AppError("Status hanya bisa diubah ke OFFLINE atau SUSPEND.", 400));
+      }
+      if (courier.current_order_id) {
+        const activeOrder = await Order.findOne({
+          where: {
+            order_id: courier.current_order_id,
+            status: { [Op.in]: ["ON_PROCESS", "BILL_VALIDATION", "BILL_SENT"] },
+          },
+        });
+        if (activeOrder) {
+          return next(
+            new AppError(
+              "Kurir masih memiliki order aktif. Status tidak bisa diubah sekarang.",
+              400
+            )
+          );
+        }
+      }
+
+      courier.status = status;
+      courier.is_active = false;
+      if (status === "OFFLINE") {
+        courier.device_id = null;
+      }
+    }
     if (is_active !== undefined) courier.is_active = is_active;
 
     let locationChanged = false;
@@ -166,14 +193,7 @@ export const updateCourier = async (req, res, next) => {
     await courier.save();
 
     if (status) {
-      if (courier.status === "IDLE") {
-        await redisClient.sAdd("online_couriers", String(courier.id));
-        if (previousStatus !== "IDLE") {
-          await dispatchService.offerPendingOrdersToCourier(courier);
-        }
-      } else {
-        await redisClient.sRem("online_couriers", String(courier.id));
-      }
+      await redisClient.sRem("online_couriers", String(courier.id));
     }
 
     logger.info(`Courier data updated: ${courier.name} (ID: ${id})`);

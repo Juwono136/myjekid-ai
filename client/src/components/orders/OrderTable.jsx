@@ -1,10 +1,10 @@
 import { format } from "date-fns";
 import { id } from "date-fns/locale";
-import { FiEye, FiUser, FiMapPin } from "react-icons/fi";
+import { FiEye, FiUser, FiMapPin, FiEdit2 } from "react-icons/fi";
 import Loader from "../Loader";
 import EmptyState from "../common/EmptyState";
 
-const OrderTable = ({ orders, isLoading, onOpenDetail }) => {
+const OrderTable = ({ orders, isLoading, onOpenDetail, onOpenEdit, canEditOrder }) => {
   const formatRupiah = (num) =>
     new Intl.NumberFormat("id-ID", {
       style: "currency",
@@ -49,9 +49,9 @@ const OrderTable = ({ orders, isLoading, onOpenDetail }) => {
             <th className="w-60">Customer Info</th>
             <th>Tujuan Pengiriman</th>
             <th>Total Transaksi</th>
-            <th>Status</th>
-            <th>Waktu</th>
-            <th className="text-center pr-6">Detail</th>
+            <th className="w-50">Status</th>
+            <th className="w-30">Waktu</th>
+            <th className="text-center pr-6">Aksi</th>
           </tr>
         </thead>
         <tbody className="text-sm divide-y divide-gray-50">
@@ -99,13 +99,27 @@ const OrderTable = ({ orders, isLoading, onOpenDetail }) => {
                     : "-"}
                 </td>
                 <td className="text-center pr-6 align-top">
-                  <button
-                    onClick={() => onOpenDetail(order.order_id)}
-                    className="btn btn-sm btn-ghost btn-square text-blue-600 bg-blue-50 hover:bg-blue-600 hover:text-white transition-all shadow-sm"
-                    title="Lihat Detail Transaksi"
-                  >
-                    <FiEye size={16} />
-                  </button>
+                  <div className="flex items-center justify-center gap-2">
+                    <button
+                      onClick={() => onOpenDetail(order.order_id)}
+                      className="btn btn-sm btn-ghost btn-square text-blue-600 bg-blue-50 hover:bg-blue-600 hover:text-white transition-all shadow-sm"
+                      title="Lihat Detail Transaksi"
+                    >
+                      <FiEye size={16} />
+                    </button>
+                    <button
+                      onClick={() => onOpenEdit(order.order_id)}
+                      disabled={canEditOrder ? !canEditOrder(order) : false}
+                      className={`btn btn-sm btn-ghost btn-square transition-all shadow-sm ${
+                        canEditOrder && !canEditOrder(order)
+                          ? "text-gray-300 bg-gray-50 cursor-not-allowed"
+                          : "text-orange-600 bg-orange-50 hover:bg-orange-600 hover:text-white"
+                      }`}
+                      title="Edit Order"
+                    >
+                      <FiEdit2 size={16} />
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))

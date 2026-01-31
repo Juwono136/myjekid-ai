@@ -22,7 +22,6 @@ const OrderDetailModal = ({ isOpen, onClose, orderId }) => {
   }, [isOpen, orderId, dispatch]);
 
   if (!isOpen) return null;
-
   const formatRupiah = (num) =>
     new Intl.NumberFormat("id-ID", {
       style: "currency",
@@ -37,6 +36,11 @@ const OrderDetailModal = ({ isOpen, onClose, orderId }) => {
     }
   };
   const items = orderDetail ? parseItems(orderDetail.items_summary) : [];
+  const notes = Array.isArray(orderDetail?.order_notes)
+    ? orderDetail.order_notes
+        .map((note) => (typeof note === "string" ? note : note?.note))
+        .filter(Boolean)
+    : [];
 
   const getStatusColor = (status) => {
     const map = {
@@ -165,6 +169,27 @@ const OrderDetailModal = ({ isOpen, onClose, orderId }) => {
                   </table>
                 </div>
 
+                {/* ORDER NOTES */}
+                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
+                  <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+                    <h4 className="text-sm font-bold text-gray-800">Catatan Order</h4>
+                  </div>
+                  <div className="p-4">
+                    {notes.length > 0 ? (
+                      <ul className="space-y-2 text-sm text-gray-700">
+                        {notes.map((note, idx) => (
+                          <li key={idx} className="flex items-start gap-2">
+                            <span className="mt-1 h-1.5 w-1.5 rounded-full bg-orange-400"></span>
+                            <span>{note}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-sm text-gray-400 italic">Tidak ada catatan.</p>
+                    )}
+                  </div>
+                </div>
+
                 {/* TOTAL */}
                 <div className="flex justify-end pt-2 border-t border-gray-100">
                   <div className="text-right">
@@ -188,6 +213,7 @@ const OrderDetailModal = ({ isOpen, onClose, orderId }) => {
           )}
         </div>
       </div>
+
     </div>
   );
 };

@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { fetchOrders } from "../features/orderSlice";
+import toast from "react-hot-toast";
+import { fetchOrders, updateOrderDetail, fetchOrderDetail, clearOrderDetail } from "../features/orderSlice";
 import useDebounce from "../hooks/useDebounce";
 
 import PageHeader from "../components/common/PageHeader";
@@ -8,10 +9,12 @@ import TableActions from "../components/common/TableActions";
 import Pagination from "../components/common/Pagination";
 import OrderTable from "../components/orders/OrderTable";
 import OrderDetailModal from "../components/orders/OrderDetailModal";
+import OrderEditModal from "../components/orders/OrderEditModal";
 
 const OrderMonitor = () => {
   const dispatch = useDispatch();
-  const { orders, pagination, isLoading } = useSelector((state) => state.orders);
+  const { orders, pagination, isLoading, orderDetail, isDetailLoading } = useSelector((state) => state.orders);
+  const { user } = useSelector((state) => state.auth);
 
   const [searchTerm, setSearchTerm] = useState("");
   const debouncedSearch = useDebounce(searchTerm, 500);
@@ -26,6 +29,10 @@ const OrderMonitor = () => {
   });
 
   const [detailModal, setDetailModal] = useState({
+    isOpen: false,
+    orderId: null,
+  });
+  const [editModal, setEditModal] = useState({
     isOpen: false,
     orderId: null,
   });
@@ -44,10 +51,28 @@ const OrderMonitor = () => {
     fetchData();
   }, [fetchData]);
 
+  useEffect(() => {
+    if (editModal.isOpen && editModal.orderId) {
+      dispatch(fetchOrderDetail(editModal.orderId));
+    } else {
+      dispatch(clearOrderDetail());
+    }
+  }, [dispatch, editModal.isOpen, editModal.orderId]);
+
   const handleSortChange = (value) => {
     const [sortBy, sortOrder] = value.split("-");
     setParams((prev) => ({ ...prev, sortBy, sortOrder }));
   };
+
+  const editableStatuses = [
+    "DRAFT",
+    "PENDING_CONFIRMATION",
+    "LOOKING_FOR_DRIVER",
+    "ON_PROCESS",
+    "BILL_VALIDATION",
+  ];
+  const canEditOrder = (order) =>
+    order && editableStatuses.includes(order.status) && ["SUPER_ADMIN", "CS"].includes(user?.role);
 
   return (
     <div className="pb-10 animate-fade-in-up">
@@ -89,6 +114,8 @@ const OrderMonitor = () => {
           orders={orders}
           isLoading={isLoading}
           onOpenDetail={(id) => setDetailModal({ isOpen: true, orderId: id })}
+          onOpenEdit={(id) => setEditModal({ isOpen: true, orderId: id })}
+          canEditOrder={canEditOrder}
         />
 
         {!isLoading && (
@@ -104,6 +131,23 @@ const OrderMonitor = () => {
         isOpen={detailModal.isOpen}
         onClose={() => setDetailModal({ isOpen: false, orderId: null })}
         orderId={detailModal.orderId}
+      />
+
+      <OrderEditModal
+        isOpen={editModal.isOpen}
+        onClose={() => setEditModal({ isOpen: false, orderId: null })}
+        order={orderDetail}
+        isLoading={isDetailLoading}
+        onSubmit={async (payload) => {
+          try {
+            await dispatch(updateOrderDetail({ orderId: editModal.orderId, payload })).unwrap();
+            toast.success("Order berhasil diperbarui.");
+            setEditModal({ isOpen: false, orderId: null });
+            fetchData();
+          } catch (error) {
+            toast.error(error || "Gagal memperbarui order.");
+          }
+        }}
       />
     </div>
   );

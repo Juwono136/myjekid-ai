@@ -34,6 +34,19 @@ export const fetchOrderDetail = createAsyncThunk(
   }
 );
 
+// Update Order Detail (Admin/CS)
+export const updateOrderDetail = createAsyncThunk(
+  "orders/updateDetail",
+  async ({ orderId, payload }, thunkAPI) => {
+    try {
+      return await orderService.updateOrder(orderId, payload);
+    } catch (error) {
+      const msg = error.response?.data?.message || error.message;
+      return thunkAPI.rejectWithValue(msg);
+    }
+  }
+);
+
 const orderSlice = createSlice({
   name: "orders",
   initialState,
@@ -70,6 +83,21 @@ const orderSlice = createSlice({
         state.orderDetail = action.payload.data;
       })
       .addCase(fetchOrderDetail.rejected, (state, action) => {
+        state.isDetailLoading = false;
+        state.isError = true;
+        state.message = action.payload;
+      });
+
+    builder
+      .addCase(updateOrderDetail.pending, (state) => {
+        state.isDetailLoading = true;
+        state.isError = false;
+      })
+      .addCase(updateOrderDetail.fulfilled, (state, action) => {
+        state.isDetailLoading = false;
+        state.orderDetail = action.payload.data;
+      })
+      .addCase(updateOrderDetail.rejected, (state, action) => {
         state.isDetailLoading = false;
         state.isError = true;
         state.message = action.payload;

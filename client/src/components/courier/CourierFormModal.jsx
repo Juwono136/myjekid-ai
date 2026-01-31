@@ -1,7 +1,15 @@
 import { useEffect, useState } from "react";
 import { FiX } from "react-icons/fi";
 
-const CourierFormModal = ({ isOpen, onClose, onSubmit, initialData, isLoading, isEditMode }) => {
+const CourierFormModal = ({
+  isOpen,
+  onClose,
+  onSubmit,
+  initialData,
+  isLoading,
+  isEditMode,
+  canManageStatus,
+}) => {
   const [formData, setFormData] = useState({
     name: "",
     phone: "",
@@ -99,12 +107,16 @@ const CourierFormModal = ({ isOpen, onClose, onSubmit, initialData, isLoading, i
                   value={formData.status}
                   onChange={(e) => setFormData({ ...formData, status: e.target.value })}
                   className="select select-bordered w-full rounded-xl focus:border-orange-500 focus:outline-none"
+                  disabled={!canManageStatus}
                 >
                   <option value="OFFLINE">OFFLINE</option>
-                  <option value="IDLE">IDLE</option>
-                  <option value="BUSY">BUSY</option>
                   <option value="SUSPEND">SUSPEND</option>
                 </select>
+                {canManageStatus && (
+                  <p className="text-[11px] text-gray-400 mt-2">
+                    Status hanya bisa diubah ke OFFLINE atau SUSPEND.
+                  </p>
+                )}
               </div>
             )}
           </div>

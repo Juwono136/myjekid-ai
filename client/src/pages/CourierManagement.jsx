@@ -21,6 +21,7 @@ import CourierFormModal from "../components/courier/CourierFormModal";
 const CourierManagement = () => {
   const dispatch = useDispatch();
   const { couriers, meta, isLoading, isError, message } = useSelector((state) => state.courier);
+  const { user } = useSelector((state) => state.auth);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
@@ -195,6 +196,7 @@ const CourierManagement = () => {
         isLoading={isLoading}
         isEditMode={isEditMode}
         initialData={selectedCourier}
+        canManageStatus={["SUPER_ADMIN", "CS"].includes(user?.role)}
       />
 
       <ConfirmationModal

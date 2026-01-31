@@ -13,6 +13,12 @@ const orderService = {
     const response = await api.get(`/orders/${orderId}`);
     return response.data;
   },
+
+  // Update order detail (Admin/CS)
+  updateOrder: async (orderId, payload) => {
+    const response = await api.put(`/orders/${orderId}`, payload);
+    return response.data;
+  },
 };
 
 export default orderService;
