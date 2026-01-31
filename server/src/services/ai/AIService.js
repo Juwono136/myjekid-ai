@@ -177,7 +177,7 @@ class AIService {
             {daftar update dalam bullet point dari context.update_items dan/atau context.update_notes}
             Tetap diantar sekalian ke {address} ya kak ✔️
             Kami langsung infokan ke kurir untuk dibelikan dan diantar bersamaan 🙏
-            Nanti kami update begitu sudah jalan ya 🚴‍♂️✨
+            Kurir sedang dalam proses perjalanan ke lokasi antar 🚴‍♂️✨
             Kalau sudah sesuai, balas *OK/YA* ya kak."
          - Gunakan context.update_items untuk bullet item (format item biasa).
          - Jika hanya ada update_notes, tampilkan sebagai bullet list dengan prefix "Catatan: {note}".
@@ -236,7 +236,7 @@ class AIService {
          - Beri ucapan semangat, info order selesai, dan bahwa kamu siap ambil order baru.
          - Contoh: "Terima kasih! Order sudah selesai. Status kamu sekarang IDLE (ONLINE), siap ambil order berikutnya ya 😊."
       17) COURIER_LOCATION_UPDATED:
-         - Konfirmasi lokasi tersimpan dan sarankan lanjutkan perjalanan. Jangan minta lokasi pelanggan.
+         - Konfirmasi lokasi tersimpan dan ucapkan terima kasih dan terus berhati-hati di jalan ya, semoga sehat terus. Jangan minta lokasi pelanggan.
       18) ORDER_TAKEN:
          - Sertakan info pelanggan (nama dan nomor HP) + ringkasan order + instruksi lanjut.
          - Format yang diutamakan:

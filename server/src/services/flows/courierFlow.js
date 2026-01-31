@@ -241,7 +241,7 @@ export const handleCourierMessage = async (
 ) => {
   try {
     const LOCATION_INSTRUCTION =
-      "*Penting:* Selalu update lokasi terkini kamu yah agar pelanggan bisa tau posisi ordernya secara real-time. \n\nSilahkan klik tombol *Clip (📎)* di WA -> Pilih *Location* -> *Send Your Current Location*.\n\nTerima kasih, semangat kak!😃👍";
+      "*Penting:* Sebelum lanjut untuk menerima order, tolong update dulu koordinat lokasinya yah kak, agar saya bisa carikan order aktif yang terdekat dengan kakak.\n\nSilahkan klik tombol Clip (📎) di WA -> Pilih Location -> Send Your Current Location.\n\nTerima kasih, semangat kak!😃👍";
     const makeCourierReply = async (status, context, required_phrases = []) =>
       await buildCourierReply({
         role: "COURIER",
@@ -335,10 +335,25 @@ export const handleCourierMessage = async (
 
     // LOCATION UPDATE HANDLER
     if (location && location.latitude && !isNaN(parseFloat(location.latitude))) {
+      const hadLocation =
+        courier && courier.current_latitude && courier.current_longitude;
       // Panggil helper update DB & Socket
       await handleCourierLocation(courier, location.latitude, location.longitude, io);
 
       // Balasan Khusus Kurir
+      if (hadLocation) {
+        const name = courier?.name || "kak";
+        return {
+          reply: await makeCourierReply(
+            "COURIER_LOCATION_UPDATED",
+            buildCourierContext({ courier, lastMessage: text }),
+            [
+              `Lokasi sudah diperbarui, terima kasih ${name}! 😊`,
+              "Tetap semangat, dan hati-hati di jalan ya kak!😃👍",
+            ],
+          ),
+        };
+      }
       return {
         reply: await makeCourierReply(
           "COURIER_LOCATION_UPDATED",
@@ -417,6 +432,15 @@ export const handleCourierMessage = async (
           ),
         };
       }
+      await courier.update({
+        status: "IDLE",
+        last_active_at: new Date(),
+        device_id: courier.device_id || rawSenderId,
+        is_active: true,
+      });
+      await redisClient.sAdd("online_couriers", String(courier.id));
+      await dispatchService.offerPendingOrdersToCourier(courier);
+
       if (!courier.current_latitude || !courier.current_longitude) {
         return {
           reply: await makeCourierReply(
@@ -426,14 +450,7 @@ export const handleCourierMessage = async (
           ),
         };
       }
-      await courier.update({
-        status: "IDLE",
-        last_active_at: new Date(),
-        device_id: courier.device_id || rawSenderId,
-        is_active: true,
-      });
-      await redisClient.sAdd("online_couriers", String(courier.id));
-      await dispatchService.offerPendingOrdersToCourier(courier);
+
       return {
         reply: await makeCourierReply(
           "COURIER_READY",
@@ -704,6 +721,14 @@ export const handleCourierMessage = async (
     // GLOBAL COMMANDS (#SIAP, #OFF, #AMBIL, #INFO)
     if (upperText === "#SIAP") {
       // Kurir tidak bisa #SIAP jika database belum punya lokasi
+      await courier.update({ status: "IDLE", last_active_at: new Date() });
+      await redisClient.sAdd("online_couriers", String(courier.id));
+
+      const offered = await dispatchService.offerPendingOrdersToCourier(courier);
+      if (offered) {
+        return;
+      }
+
       if (!courier.current_latitude || !courier.current_longitude) {
         return {
           reply: await makeCourierReply(
@@ -712,14 +737,6 @@ export const handleCourierMessage = async (
             [LOCATION_INSTRUCTION],
           ),
         };
-      }
-
-      await courier.update({ status: "IDLE", last_active_at: new Date() });
-      await redisClient.sAdd("online_couriers", String(courier.id));
-
-      const offered = await dispatchService.offerPendingOrdersToCourier(courier);
-      if (offered) {
-        return;
       }
 
       return {

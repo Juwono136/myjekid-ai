@@ -14,8 +14,28 @@ const buildPhoneCandidates = (rawPhone) => {
   const candidates = new Set();
   if (!rawPhone) return [];
 
-  const rawDigits = rawPhone.toString().replace(/[^0-9]/g, "");
-  if (rawDigits) candidates.add(rawDigits);
+  const rawText = rawPhone.toString();
+  const rawDigits = rawText.replace(/[^0-9]/g, "");
+  if (rawDigits) {
+    candidates.add(rawDigits);
+    // Handle sender IDs with suffix (e.g., ":26") by extracting plausible phone
+    const match = rawDigits.match(/(62\d{8,13}|0\d{8,12}|8\d{8,12})/);
+    if (match?.[1]) candidates.add(match[1]);
+    // If digits are longer than a phone number OR original contains non-digit, try all substrings 10-15 digits
+    if (rawDigits.length > 15 || /[^0-9]/.test(rawText)) {
+      for (let start = 0; start < rawDigits.length; start += 1) {
+        for (let len = 10; len <= 15; len += 1) {
+          const chunk = rawDigits.slice(start, start + len);
+          if (chunk.length < 10 || chunk.length > 15) continue;
+          if (/^(62|0|8)\d+$/.test(chunk)) {
+            candidates.add(chunk);
+            const normalizedChunk = sanitizePhoneNumber(chunk);
+            if (normalizedChunk) candidates.add(normalizedChunk);
+          }
+        }
+      }
+    }
+  }
 
   const normalized = sanitizePhoneNumber(rawPhone);
   if (normalized) {
@@ -195,6 +215,31 @@ export const handleIncomingMessage = async (req, res) => {
         ],
       },
     });
+    if (!courier && rawSenderId?.includes("@lid")) {
+      const rawNotifyName = (payload.pushname || payload._data?.notifyName || "").toString();
+      const cleanedName = rawNotifyName
+        .replace(/\(.*?\)/g, "")
+        .replace(/[^\p{L}\p{N}\s]/gu, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (cleanedName) {
+        courier = await Courier.findOne({
+          where: {
+            name: { [Op.iLike]: cleanedName },
+          },
+        });
+        if (!courier) {
+          courier = await Courier.findOne({
+            where: {
+              name: { [Op.iLike]: `%${cleanedName}%` },
+            },
+          });
+        }
+      }
+      if (courier && courier.device_id !== rawSenderId) {
+        await courier.update({ device_id: rawSenderId });
+      }
+    }
 
     let isActingAsCourier = false;
     if (testMode === "COURIER") {

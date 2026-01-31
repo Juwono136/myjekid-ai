@@ -1164,6 +1164,86 @@ export const handleUserMessage = async (
         };
       }
 
+      if (isAffirmative(lowerText)) {
+        await freshOrder.update({
+          items_summary: pendingUpdate.items || freshOrder.items_summary,
+          pickup_address: pendingUpdate.pickup_address || freshOrder.pickup_address,
+          delivery_address: pendingUpdate.delivery_address || freshOrder.delivery_address,
+          raw_message: pendingUpdate.raw_message || cleanText,
+        });
+
+        if (Array.isArray(pendingUpdate.update_notes) && pendingUpdate.update_notes.length) {
+          await appendOrderNotes(freshOrder, pendingUpdate.update_notes);
+        }
+
+        if (pendingUpdate.wants_remove_note) {
+          await removeOrderNotes(freshOrder, pendingUpdate.remove_notes || []);
+        }
+
+        if (sessionDraft.pending_addon_details) {
+          sessionDraft.pending_addon_details = false;
+        }
+
+        sessionDraft.pending_order_update = null;
+        await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
+
+        const combinedUpdateNotes = [
+          ...(freshOrder.order_notes || []),
+          ...(pendingUpdate.update_notes || []),
+        ].filter(Boolean);
+
+        await notifyCourierUpdate(freshOrder, {
+          changes: pendingUpdate.changes || [],
+          last_message: pendingUpdate.raw_message || cleanText,
+        });
+
+        return {
+          reply: await makeReply(
+            "ORDER_UPDATE_APPLIED",
+            buildUserContext({
+              user,
+              draftOrder,
+              activeOrder,
+              items: pendingUpdate.items || freshOrder.items_summary || [],
+              pickup: freshOrder.pickup_address || "",
+              address: freshOrder.delivery_address || "",
+              notes: uniqueNotesList(combinedUpdateNotes),
+              changes: pendingUpdate.changes || [],
+              updateItems: pendingUpdate.update_items || [],
+              updateNotes: pendingUpdate.update_notes || [],
+              flags: {
+                show_details: false,
+                address_update_blocked: pendingUpdate.address_update_blocked,
+                pickup_update_blocked: pendingUpdate.pickup_update_blocked,
+              },
+              lastMessage: cleanText,
+            }),
+          ),
+        };
+      }
+
+      if (isNegative(lowerText)) {
+        sessionDraft.pending_order_update = null;
+        sessionDraft.pending_addon_details = false;
+        await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
+        return {
+          reply: await makeReply(
+            "ORDER_UPDATE_CANCELLED",
+            buildUserContext({
+              user,
+              draftOrder,
+              activeOrder,
+              items: freshOrder.items_summary || [],
+              pickup: freshOrder.pickup_address || "",
+              address: freshOrder.delivery_address || "",
+              notes: uniqueNotesList(freshOrder.order_notes || []),
+              flags: { show_details: false },
+              lastMessage: cleanText,
+            }),
+          ),
+        };
+      }
+
       const wantsRemoveItem =
         ["hapus", "batal", "gak jadi", "nggak jadi", "cancel"].some((w) => lowerText.includes(w)) &&
         aiItems.length;
@@ -1328,86 +1408,6 @@ export const handleUserMessage = async (
               lastMessage: cleanText,
             }),
             ["Kalau sudah sesuai, balas *OK/YA* ya kak."],
-          ),
-        };
-      }
-
-      if (isAffirmative(lowerText)) {
-        await freshOrder.update({
-          items_summary: pendingUpdate.items || freshOrder.items_summary,
-          pickup_address: pendingUpdate.pickup_address || freshOrder.pickup_address,
-          delivery_address: pendingUpdate.delivery_address || freshOrder.delivery_address,
-          raw_message: pendingUpdate.raw_message || cleanText,
-        });
-
-        if (Array.isArray(pendingUpdate.update_notes) && pendingUpdate.update_notes.length) {
-          await appendOrderNotes(freshOrder, pendingUpdate.update_notes);
-        }
-
-        if (pendingUpdate.wants_remove_note) {
-          await removeOrderNotes(freshOrder, pendingUpdate.remove_notes || []);
-        }
-
-        if (sessionDraft.pending_addon_details) {
-          sessionDraft.pending_addon_details = false;
-        }
-
-        sessionDraft.pending_order_update = null;
-        await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
-
-        const combinedUpdateNotes = [
-          ...(freshOrder.order_notes || []),
-          ...(pendingUpdate.update_notes || []),
-        ].filter(Boolean);
-
-        await notifyCourierUpdate(freshOrder, {
-          changes: pendingUpdate.changes || [],
-          last_message: pendingUpdate.raw_message || cleanText,
-        });
-
-        return {
-          reply: await makeReply(
-            "ORDER_UPDATE_APPLIED",
-            buildUserContext({
-              user,
-              draftOrder,
-              activeOrder,
-              items: pendingUpdate.items || freshOrder.items_summary || [],
-              pickup: freshOrder.pickup_address || "",
-              address: freshOrder.delivery_address || "",
-              notes: uniqueNotesList(combinedUpdateNotes),
-              changes: pendingUpdate.changes || [],
-              updateItems: pendingUpdate.update_items || [],
-              updateNotes: pendingUpdate.update_notes || [],
-              flags: {
-                show_details: false,
-                address_update_blocked: pendingUpdate.address_update_blocked,
-                pickup_update_blocked: pendingUpdate.pickup_update_blocked,
-              },
-              lastMessage: cleanText,
-            }),
-          ),
-        };
-      }
-
-      if (isNegative(lowerText)) {
-        sessionDraft.pending_order_update = null;
-        sessionDraft.pending_addon_details = false;
-        await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
-        return {
-          reply: await makeReply(
-            "ORDER_UPDATE_CANCELLED",
-            buildUserContext({
-              user,
-              draftOrder,
-              activeOrder,
-              items: freshOrder.items_summary || [],
-              pickup: freshOrder.pickup_address || "",
-              address: freshOrder.delivery_address || "",
-              notes: uniqueNotesList(freshOrder.order_notes || []),
-              flags: { show_details: false },
-              lastMessage: cleanText,
-            }),
           ),
         };
       }
