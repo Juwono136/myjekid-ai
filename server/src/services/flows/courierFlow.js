@@ -57,6 +57,8 @@ const buildCourierContext = ({
   courier_name: courier?.name || "Kurir",
   courier_status: courier?.status || "UNKNOWN",
   order_status: order?.status || "NONE",
+  order_id: order?.order_id || null,
+  short_code: order?.short_code || null,
   items,
   pickup,
   address,
@@ -82,13 +84,23 @@ const getDashboardReply = (courier) => {
     `📡 Status : ${statusIcon} *${courier.status}*\n` +
     `🗺️ Posisi : ${locStatus}\n` +
     `━━━━━━━━━━━━━━━━━━━\n\n` +
-    `*Menu Perintah:*\n` +
-    `▶️ *#SIAP* : Aktifkan Akun Untuk Menerima Order\n` +
-    `⏸️ *#OFF* : Matikan Akun (Istirahat/Offline)\n` +
-    `➡️ *#INFO* : Cek Status Kurir Saat ini\n\n` +
+    `*Menu Perintah Untuk Kurir:*\n` +
+    `▶️ *#SIAP atau ketik online* : Aktifkan Akun Untuk Menerima dan Ambil Orderan\n` +
+    `⏸️ *#OFF atau ketik offline* : Matikan Akun (Istirahat/Offline)\n` +
+    `➡️ *#INFO* : Cek Status Kurir Saat ini\n` +
+    `➡️ *#SELESAI* : Untuk menyelesaian orderan (hanya jika orderan sudah sampai di tujuan)\n` +
+    `➡️ *Cek status order* : Untuk Cek Status orderan yang aktif Saat ini\n` +
+    `➡️ *Cek status kurir* : Untuk Cek Status kurir terkini\n\n` +
     `*PENTING:* Sebagai kurir, kamu wajib aktifkan lokasi terkini dengan cara: 👉 Klik tombol *Clip (📎)* di WA -> Pilih *Location* -> *Send Your Current Location* untuk mendapatkan order. \n\n` +
-    `_Tetap semangat & hati-hati di jalan!_ 💪`
+    `_Tetap semangat & hati-hati di jalan ya kak!_ 😃💪`
   );
+};
+
+/** Balasan singkat hanya status + posisi dari DB (tanpa menu dashboard). Dipakai untuk "cek status order/kurir" dan #SELESAI tanpa order. */
+const getBriefStatusReply = (courier) => {
+  const statusIcon = courier.status === "IDLE" ? "🟢" : courier.status === "BUSY" ? "🔴" : "⚫";
+  const locStatus = courier.current_latitude ? "📍 Terkonfirmasi" : "⚠️ Belum ada lokasi";
+  return `👤 ${courier.name}\n📡 Status : ${statusIcon} *${courier.status}*\n🗺️ Posisi : ${locStatus}`;
 };
 
 const executeBillFinalization = async (courier, orderId) => {
@@ -145,6 +157,8 @@ const executeBillFinalization = async (courier, orderId) => {
         user_name: user.name,
         courier_name: courier.name,
         order_status: order.status,
+        order_id: order.order_id || null,
+        short_code: order.short_code || null,
         items: order.items_summary || [],
         pickup: order.pickup_address,
         address: order.delivery_address,
@@ -387,6 +401,66 @@ export const handleCourierMessage = async (
     const asksStatus = ["status", "cek status", "info status", "lagi apa", "sibuk"].some((w) =>
       lowerText.includes(w),
     );
+    const wantsOrderDetails = /(detail|rincian|ringkasan|menu|item|daftar|orderan|\border\b)/i.test(
+      lowerText,
+    );
+    const isCourierGreeting = /^(pagi|siang|sore|malam|halo|hai|hei|assalamualaikum|salam)\b/i.test(
+      lowerText.trim(),
+    ) || /\b(pagi|siang|sore|malam)\s*(kak|ya)?\s*$/i.test(lowerText.trim());
+    const isCourierThanks = /(terima kasih|makasih|thanks|thank you|tengkyu)/i.test(lowerText);
+
+    // Sapaan: balas ramah dan arahkan ke #INFO
+    if (isCourierGreeting) {
+      const trim = lowerText.trim();
+      let sapaan = "Halo";
+      if (/\bpagi\b/.test(trim)) sapaan = "Pagi";
+      else if (/\bsiang\b/.test(trim)) sapaan = "Siang";
+      else if (/\bsore\b/.test(trim)) sapaan = "Sore";
+      else if (/\bmalam\b/.test(trim)) sapaan = "Malam";
+      return {
+        reply: `${sapaan}! Ada yang bisa dibantu? Ketik *#INFO* untuk cek status kurir ya 😊`,
+      };
+    }
+    if (isCourierThanks) {
+      return {
+        reply: "Sama-sama! Semangat dan hati-hati di jalan ya 😊",
+      };
+    }
+
+    // Cek minta detail/status order DULU agar "detail orderan yang aktif" tidak kena wantsOnline
+    if (activeOrder && (asksStatus || wantsOrderDetails)) {
+      const freshOrder = await Order.findOne({
+        where: { order_id: activeOrder.order_id },
+        include: [{ model: Courier, as: "courier" }],
+      });
+      const orderForReply = freshOrder || activeOrder;
+      const totalAllowed = ["BILL_SENT", "COMPLETED"].includes(orderForReply.status);
+      return {
+        reply: await makeCourierReply(
+          "COURIER_ORDER_STATUS",
+          buildCourierContext({
+            courier,
+            order: orderForReply,
+            items: orderForReply.items_summary || [],
+            pickup: orderForReply.pickup_address || "",
+            address: orderForReply.delivery_address || "",
+            notes: uniqueNotesList(orderForReply.order_notes || []),
+            flags: {
+              show_details: true,
+              total_amount: totalAllowed ? orderForReply.total_amount || 0 : undefined,
+            },
+            lastMessage: text,
+          }),
+        ),
+      };
+    }
+    if (asksStatus) {
+      const brief = getBriefStatusReply(courier);
+      const orderHint = /order/.test(lowerText)
+        ? "Kamu tidak punya order aktif saat ini.\n\n"
+        : "";
+      return { reply: `${orderHint}${brief}` };
+    }
 
     if (wantsOffline) {
       if (activeOrder) {
@@ -451,12 +525,7 @@ export const handleCourierMessage = async (
         };
       }
 
-      return {
-        reply: await makeCourierReply(
-          "COURIER_READY",
-          buildCourierContext({ courier, lastMessage: text }),
-        ),
-      };
+      return { reply: getDashboardReply(courier) };
     }
 
     // C. ACTIVE ORDER FLOW (ON_PROCESS / SCAN STRUK)
@@ -493,6 +562,23 @@ export const handleCourierMessage = async (
           const detectedTotal =
             typeof aiResult === "object" ? aiResult.total : parseInt(aiResult) || 0;
 
+          if (!detectedTotal || detectedTotal < 1000) {
+            const invalidReceiptReply = await makeCourierReply(
+              "INVALID_RECEIPT_IMAGE",
+              buildCourierContext({
+                courier,
+                order,
+                items: order.items_summary || [],
+                pickup: order.pickup_address || "",
+                address: order.delivery_address || "",
+                notes: uniqueNotesList(order.order_notes || []),
+                lastMessage: text,
+              }),
+            );
+            await messageService.sendMessage(courier.phone, invalidReceiptReply);
+            return;
+          }
+
           await orderService.saveBillDraft(order.order_id, detectedTotal, storedFileName);
 
           setTimeout(
@@ -515,6 +601,7 @@ export const handleCourierMessage = async (
             3 * 60 * 1000,
           );
 
+          const totalFormatted = `Rp${Number(detectedTotal).toLocaleString("id-ID")}`;
           const scanResultReply = await makeCourierReply(
             "SCAN_RESULT",
             buildCourierContext({
@@ -527,6 +614,10 @@ export const handleCourierMessage = async (
               flags: { detected_total: detectedTotal },
               lastMessage: text,
             }),
+            [
+              `Total tagihan yang terdeteksi adalah ${totalFormatted}.`,
+              "Ketik OK/Y jika benar, atau ketik angka dari total tagihannya jika perlu revisi (Contoh: 540000).",
+            ],
           );
           await messageService.sendMessage(courier.phone, scanResultReply);
         } catch (err) {
@@ -550,20 +641,12 @@ export const handleCourierMessage = async (
       return null;
     };
 
-    if (asksStatus) {
+    // Kurir kirim gambar/file tapi tidak punya order aktif → tolak dengan pesan yang sesuai
+    if ((mediaUrl || rawBase64) && !activeOrder) {
       return {
         reply: await makeCourierReply(
-          "COURIER_ORDER_STATUS",
-          buildCourierContext({
-            courier,
-            order: activeOrder || null,
-            items: activeOrder?.items_summary || [],
-            pickup: activeOrder?.pickup_address || "",
-            address: activeOrder?.delivery_address || "",
-            notes: uniqueNotesList(activeOrder?.order_notes || []),
-            flags: { show_details: false },
-            lastMessage: text,
-          }),
+          "COURIER_IMAGE_REJECTED",
+          buildCourierContext({ courier, lastMessage: text }),
         ),
       };
     }
@@ -739,12 +822,7 @@ export const handleCourierMessage = async (
         };
       }
 
-      return {
-        reply: await makeCourierReply(
-          "COURIER_READY",
-          buildCourierContext({ courier, lastMessage: text }),
-        ),
-      };
+      return { reply: getDashboardReply(courier) };
     } else if (upperText === "#OFF") {
       await courier.update({ status: "OFFLINE" });
       await redisClient.sRem("online_couriers", String(courier.id));
@@ -872,6 +950,8 @@ export const handleCourierMessage = async (
           role: "CUSTOMER",
           user_name: userData?.name || "Customer",
           order_status: orderData.status,
+          order_id: orderData.order_id || null,
+          short_code: orderData.short_code || null,
           items: orderData.items_summary || [],
           pickup: orderData.pickup_address || "",
           address: orderData.delivery_address || "",
@@ -911,11 +991,13 @@ export const handleCourierMessage = async (
         };
       }
     } else if (["#INFO", "MENU", "PING"].includes(upperText)) {
+      return { reply: getDashboardReply(courier) };
+    }
+
+    if (upperText === "#SELESAI") {
       return {
-        reply: await makeCourierReply(
-          "COURIER_DASHBOARD",
-          buildCourierContext({ courier, lastMessage: text }),
-        ),
+        reply:
+          "Kamu tidak punya order aktif saat ini. Ketik *#SELESAI* saat sedang mengerjakan order yang sudah sampai di tujuan ya 😊",
       };
     }
 

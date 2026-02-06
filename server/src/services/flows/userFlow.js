@@ -77,15 +77,30 @@ const isConfirmingText = (text) =>
   isAffirmative(text) ||
   /(sudah|sesuai|benar|mantap|sip|terima kasih|makasih|thanks)/.test(text);
 
-const isNegative = (text) =>
-  ["tidak", "gak", "ga", "nggak", "batal", "gajadi", "ga jadi", "nggak jadi", "bukan", "gk"].some(
-    (w) => text.includes(w),
+// Gunakan word boundary agar "ga" di dalam kata (misal "gorengannya") tidak dianggap negatif
+const isNegative = (text) => {
+  const lower = text.toLowerCase().trim();
+  return (
+    /\b(tidak|gak|ga|nggak|batal|gajadi|bukan|gk)\b/.test(lower) ||
+    /\b(ga|nggak)\s+jadi\b/.test(lower)
   );
+};
 
 const isPolite = (text) =>
   ["makasih", "terima kasih", "thanks", "thank", "oke", "ok", "sip", "mantap", "siap", "baik"].some((w) =>
     text.includes(w),
   );
+
+const isGreeting = (text) =>
+  /^(pagi|siang|sore|malam|halo|hai|hei|helo|hello|assalamualaikum|wr\s*wb|salam)\b/i.test(text.trim()) ||
+  /\b(pagi|siang|sore|malam)\s*(kak|ya|)?\s*$/i.test(text.trim()) ||
+  /^(halo|hai|hei)\s*(kak|)?\s*$/i.test(text.trim());
+
+const isIntroToOrder = (text) =>
+  /mau\s*(pesan|pesen|order)/i.test(text) ||
+  /(pesen|order)\s*dong/i.test(text) ||
+  /(mau\s*)?(titip|nitip)/i.test(text) ||
+  /pesan\s*(dong|ya|dong)/i.test(text);
 
 const isPhotoNoteRequest = (text) =>
   ["fotoin", "foto", "photo", "bukti serah", "bukti terima", "salah terima"].some((w) =>
@@ -145,6 +160,75 @@ const parseGoogleMapsLink = (text = "") => {
     return { latitude: parseFloat(atMatch[1]), longitude: parseFloat(atMatch[2]) };
   }
   return null;
+};
+
+/**
+ * Jika pesan berisi alamat antar + instruksi titip (bilang aja/titipan/titip),
+ * pisahkan jadi delivery_address dan order_notes agar sesuai kolom tabel orders.
+ * Dipakai sebagai fallback bila AI mengembalikan semuanya di order_notes.
+ */
+const splitAddressAndTitipNote = (text) => {
+  const t = (text || "").trim();
+  if (!t || t.length < 10) return null;
+  const lower = t.toLowerCase();
+  const hasAddressHint = /antar\s+ke\s+|ke\s+ruang\s+|kantor\s+|gedung\s+|lantai\s+|alamat\s+antar/i.test(t);
+  const hasTitipHint = /\bbilang\s+aja\s+|\btitipan\s+|\btitip\s+ke\s+|\bserah\s+ke\s+/i.test(t);
+  if (!hasAddressHint || !hasTitipHint) return null;
+
+  let addressPart = "";
+  let notePart = "";
+  const bilangAjaMatch = t.match(/\s+(bilang\s+aja\s+[\s\S]+)/i);
+  const titipanMatch = t.match(/\s+(titipan\s+[\s\S]+)/i);
+  const titipKeMatch = t.match(/\s+(titip\s+ke\s+[\s\S]+)/i);
+
+  if (bilangAjaMatch && bilangAjaMatch.index !== undefined) {
+    addressPart = t.slice(0, bilangAjaMatch.index).trim();
+    notePart = bilangAjaMatch[1].trim();
+  } else if (titipanMatch && titipanMatch.index !== undefined) {
+    addressPart = t.slice(0, titipanMatch.index).trim();
+    notePart = titipanMatch[1].trim();
+    if (!/^bilang\s+aja\s+/i.test(notePart)) notePart = `Bilang aja ${notePart}`;
+  } else if (titipKeMatch && titipKeMatch.index !== undefined) {
+    addressPart = t.slice(0, titipKeMatch.index).trim();
+    notePart = titipKeMatch[1].trim();
+  }
+  if (!addressPart || !notePart) return null;
+
+  const cleanAddress = addressPart
+    .replace(/^antar\s+ke\s+/i, "")
+    .replace(/\s*\.\s*$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const addressNormalized = cleanAddress
+    .split(/\s*\.\s*/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((seg) => {
+      const s = seg.trim();
+      if (!s) return s;
+      return s
+        .split(/\s+/)
+        .map((w) => {
+          const low = w.toLowerCase();
+          if (low === "ke" || low === "ya" || low === "di" || low.length <= 2) return low;
+          if (/^(pak|bu|bang|mbak)\b/i.test(w)) return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+          return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+        })
+        .join(" ");
+    })
+    .join(", ");
+  const noteNormalized = notePart
+    .replace(/\bdri\b/gi, "dari")
+    .replace(/\s+/g, " ")
+    .trim();
+  const noteCapitalized =
+    noteNormalized.charAt(0).toUpperCase() + noteNormalized.slice(1).toLowerCase();
+
+  if (addressNormalized.length < 4) return null;
+  return {
+    delivery_address: addressNormalized,
+    order_notes: [noteCapitalized],
+  };
 };
 
 const isWeakAddress = (address = "") => {
@@ -274,14 +358,26 @@ const inferPickupFromText = (items = [], rawText = "") => {
 const extractOrderNote = (rawText = "") => {
   const text = rawText.toLowerCase();
   if (text.includes("bilang")) {
-    return rawText.slice(text.indexOf("bilang")).trim();
+    return rawText.slice(rawText.toLowerCase().indexOf("bilang")).trim();
   }
-  if (text.includes("titipan")) {
-    return rawText.slice(text.indexOf("titipan")).trim();
+  if (text.includes("titip") || text.includes("titipan")) {
+    const idx = text.includes("titip") ? text.indexOf("titip") : text.indexOf("titipan");
+    return rawText.slice(idx).trim();
   }
   if (text.includes("kasih tau") || text.includes("kasih tahu")) {
     const idx = text.includes("kasih tau") ? text.indexOf("kasih tau") : text.indexOf("kasih tahu");
     return rawText.slice(idx).trim();
+  }
+  if (text.includes("kasih pesenan") || text.includes("kasih pesenannya")) {
+    const idx = text.includes("kasih pesenan") ? text.indexOf("kasih pesenan") : text.indexOf("kasih pesenannya");
+    return rawText.slice(idx).trim();
+  }
+  if (text.includes("serahkan") || text.includes("serah kan")) {
+    const idx = text.includes("serahkan") ? text.indexOf("serahkan") : text.indexOf("serah kan");
+    return rawText.slice(idx).trim();
+  }
+  if (text.includes("berikan") && text.includes(" ke ")) {
+    return rawText.slice(text.indexOf("berikan")).trim();
   }
   if (text.includes("suruh")) {
     return rawText.slice(text.indexOf("suruh")).trim();
@@ -291,6 +387,9 @@ const extractOrderNote = (rawText = "") => {
   }
   if (text.includes("note")) {
     return rawText.slice(text.indexOf("note")).trim();
+  }
+  if (text.includes("tolong") && (text.includes("kasih") || text.includes("serah") || text.includes("sampai") || text.includes(" aja ya"))) {
+    return rawText.slice(text.indexOf("tolong")).trim();
   }
   return null;
 };
@@ -309,27 +408,55 @@ const uniqueNotesList = (notes = []) => {
 };
 
 
-const mergeItems = (existingItems = [], incomingItems = [], rawText = "") => {
+const isReplaceIntent = (text) => {
+  const t = (text || "").trim();
+  return (
+    /ganti\s+.+\s+jadi|ubah\s+.+\s+jadi/i.test(t) ||
+    /\bganti\s+jadi\b/i.test(t) ||
+    /\bdiganti\s+jadi\b/i.test(t) ||
+    /yang\s+pakai\s+.+\s+(ganti|tolong\s+ganti)\s+jadi/i.test(t) ||
+    /yang\s+.+\s+diganti\s+jadi/i.test(t) ||
+    /yang\s+.+\s+(tidak\s+jadi|batal)\b/i.test(t) ||
+    /yang\s+.+\s+dihapus/i.test(t) ||
+    /\bdihapus\s*aja\b/i.test(t) ||
+    /jadinya\s+\d+\s*porsi\s*aja/i.test(t) ||
+    /\d+\s*porsi\s*aja\s+jadinya/i.test(t)
+  );
+};
+
+const mergeItems = (existingItems = [], incomingItems = [], rawText = "", replaceNoteForMatch = false) => {
   const result = Array.isArray(existingItems) ? [...existingItems] : [];
   const priceTokens = extractPriceTokens(rawText);
+  const useReplaceNote = replaceNoteForMatch && isReplaceIntent(rawText);
+
+  const noteHasPrice = (note) =>
+    typeof note === "string" &&
+    /\b(\d+\s*(rb|rbu|ribu|k)\b|rp\s*[\d.,]+)/i.test(note);
 
   incomingItems.forEach((incoming, idx) => {
     const normalizedLabel = canonicalizeItemLabel(incoming.item);
     const incomingItem = { ...incoming, item: normalizedLabel || incoming.item };
     const incomingName = normalizeItemName(incoming.item);
     const matchIndex = result.findIndex((item) => normalizeItemName(item.item) === incomingName);
-    const priceNote = priceTokens[idx] || "";
+    const priceNote =
+      priceTokens[idx] && !noteHasPrice(incoming.note) ? priceTokens[idx] : "";
 
     if (matchIndex >= 0) {
       const prev = result[matchIndex];
-    const mergedNote = mergeNotes(prev.note, incoming.note, priceNote);
+      const note =
+        useReplaceNote && (incoming.note || "").trim().length > 0
+          ? (incoming.note || "").trim() + (priceNote ? `; ${priceNote}` : "")
+          : mergeNotes(prev.note, incoming.note, priceNote);
       result[matchIndex] = {
         ...prev,
         qty: incoming.qty || prev.qty || 1,
-        note: mergedNote || prev.note || "",
+        note: note || prev.note || "",
       };
     } else {
-      const mergedNote = mergeNotes(incoming.note, priceNote);
+      const mergedNote = mergeNotes(
+        incoming.note,
+        noteHasPrice(incoming.note) ? "" : priceNote,
+      );
       result.push({
         ...incomingItem,
         qty: incoming.qty || 1,
@@ -399,6 +526,8 @@ const notifyCourierUpdate = async (order, updateContext = {}) => {
       role: "COURIER",
       courier_name: courier.name,
       order_status: order.status,
+      order_id: order.order_id || null,
+      short_code: order.short_code || null,
       items: order.items_summary || [],
       pickup: order.pickup_address || "",
       address: order.delivery_address || "",
@@ -435,20 +564,25 @@ const buildUserContext = ({
   updateNotes = [],
   flags = {},
   lastMessage = "",
-}) => ({
-  role: "CUSTOMER",
-  user_name: user?.name || "Customer",
-  order_status: draftOrder?.status || activeOrder?.status || "NONE",
-  items,
-  pickup,
-  address,
-  notes: uniqueNotesList(notes),
-  changes,
-  update_items: updateItems,
-  update_notes: updateNotes,
-  flags,
-  last_message: lastMessage,
-});
+}) => {
+  const order = draftOrder || activeOrder;
+  return {
+    role: "CUSTOMER",
+    user_name: user?.name || "Customer",
+    order_status: draftOrder?.status || activeOrder?.status || "NONE",
+    order_id: order?.order_id || null,
+    short_code: order?.short_code || null,
+    items,
+    pickup,
+    address,
+    notes: uniqueNotesList(notes),
+    changes,
+    update_items: updateItems,
+    update_notes: updateNotes,
+    flags,
+    last_message: lastMessage,
+  };
+};
 
 const buildUserReply = async (responseSpec) => {
   return await aiService.generateReply(responseSpec);
@@ -569,36 +703,35 @@ export const handleUserMessage = async (
     });
 
     sessionDraft.has_coordinate = true;
-    sessionDraft.location_confirmed = true;
-    sessionDraft.pending_location_confirmation = false;
     sessionDraft.coordinate = {
       lat: locationData.latitude,
       long: locationData.longitude,
     };
-
-    await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
-
-    const draftOrder = await Order.findOne({
+    const draftOrderLoc = await Order.findOne({
       where: { user_phone: realPhone, status: { [Op.in]: ["DRAFT", "PENDING_CONFIRMATION"] } },
       order: [["created_at", "DESC"]],
     });
-    const activeOrder = await Order.findOne({
+    const activeOrderLoc = await Order.findOne({
       where: {
         user_phone: realPhone,
         status: { [Op.in]: ["LOOKING_FOR_DRIVER", "ON_PROCESS", "BILL_VALIDATION", "BILL_SENT"] },
       },
       order: [["created_at", "DESC"]],
     });
+    const hasItemsLoc = Array.isArray(draftOrderLoc?.items_summary) && draftOrderLoc.items_summary.length > 0;
+    const hasPickupLoc = draftOrderLoc?.pickup_address?.length > 2;
+    const hasAddressLoc = draftOrderLoc?.delivery_address?.length > 3;
+    const needsOkConfirm = draftOrderLoc && hasItemsLoc && hasPickupLoc && hasAddressLoc;
+    sessionDraft.location_confirmed = !needsOkConfirm;
+    sessionDraft.pending_location_confirmation = needsOkConfirm;
+    await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
 
-    const hasItems = Array.isArray(draftOrder?.items_summary) && draftOrder.items_summary.length > 0;
-    const hasPickup = draftOrder?.pickup_address?.length > 2;
-    const hasAddress = draftOrder?.delivery_address?.length > 3;
     const replyStatus =
-      draftOrder && hasItems && hasPickup && hasAddress ? "LOCATION_RECEIVED_CONFIRM" : "LOCATION_RECEIVED";
+      needsOkConfirm ? "LOCATION_RECEIVED_CONFIRM" : "LOCATION_RECEIVED";
 
-    if (draftOrder && hasItems && hasPickup && hasAddress) {
-      if (draftOrder.status !== "PENDING_CONFIRMATION") {
-        await draftOrder.update({ status: "PENDING_CONFIRMATION" });
+    if (draftOrderLoc && hasItemsLoc && hasPickupLoc && hasAddressLoc) {
+      if (draftOrderLoc.status !== "PENDING_CONFIRMATION") {
+        await draftOrderLoc.update({ status: "PENDING_CONFIRMATION" });
       }
     }
 
@@ -607,12 +740,12 @@ export const handleUserMessage = async (
         replyStatus,
         buildUserContext({
           user,
-          draftOrder,
-          activeOrder,
-          items: draftOrder?.items_summary || activeOrder?.items_summary || [],
-          pickup: draftOrder?.pickup_address || activeOrder?.pickup_address || "",
-          address: draftOrder?.delivery_address || activeOrder?.delivery_address || "",
-          notes: uniqueNotesList(draftOrder?.order_notes || activeOrder?.order_notes || []),
+          draftOrder: draftOrderLoc,
+          activeOrder: activeOrderLoc,
+          items: draftOrderLoc?.items_summary || activeOrderLoc?.items_summary || [],
+          pickup: draftOrderLoc?.pickup_address || activeOrderLoc?.pickup_address || "",
+          address: draftOrderLoc?.delivery_address || activeOrderLoc?.delivery_address || "",
+          notes: uniqueNotesList(draftOrderLoc?.order_notes || activeOrderLoc?.order_notes || []),
           flags: { needs_confirmation: replyStatus === "LOCATION_RECEIVED_CONFIRM" },
           lastMessage: cleanText,
         }),
@@ -630,58 +763,48 @@ export const handleUserMessage = async (
     });
 
     sessionDraft.has_coordinate = true;
-    sessionDraft.location_confirmed = true;
-    sessionDraft.pending_location_confirmation = false;
     sessionDraft.coordinate = {
       lat: mapLinkLocation.latitude,
       long: mapLinkLocation.longitude,
     };
 
+    const draftOrderMap = await Order.findOne({
+      where: { user_phone: realPhone, status: { [Op.in]: ["DRAFT", "PENDING_CONFIRMATION"] } },
+      order: [["created_at", "DESC"]],
+    });
+    const activeOrderMap = await Order.findOne({
+      where: {
+        user_phone: realPhone,
+        status: { [Op.in]: ["LOOKING_FOR_DRIVER", "ON_PROCESS", "BILL_VALIDATION", "BILL_SENT"] },
+      },
+      order: [["created_at", "DESC"]],
+    });
+    const hasItemsMap = Array.isArray(draftOrderMap?.items_summary) && draftOrderMap.items_summary.length > 0;
+    const hasPickupMap = draftOrderMap?.pickup_address?.length > 2;
+    const hasAddressMap = draftOrderMap?.delivery_address?.length > 3;
+    const needsOkConfirmMap = draftOrderMap && hasItemsMap && hasPickupMap && hasAddressMap;
+    sessionDraft.location_confirmed = !needsOkConfirmMap;
+    sessionDraft.pending_location_confirmation = needsOkConfirmMap;
     await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
 
-    if (sessionDraft.pending_location_confirmation) {
-      sessionDraft.location_confirmed = true;
-      sessionDraft.pending_location_confirmation = false;
-      await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
-
-      const draftOrder = await Order.findOne({
-        where: { user_phone: realPhone, status: { [Op.in]: ["DRAFT", "PENDING_CONFIRMATION"] } },
-        order: [["created_at", "DESC"]],
-      });
-
-      if (draftOrder) {
-        if (draftOrder.status !== "PENDING_CONFIRMATION") {
-          await draftOrder.update({ status: "PENDING_CONFIRMATION" });
-        }
-        return {
-          reply: await makeReply(
-            "ORDER_SUMMARY",
-            buildUserContext({
-              user,
-              draftOrder,
-              items: draftOrder.items_summary,
-              pickup: draftOrder.pickup_address,
-              address: draftOrder.delivery_address,
-              notes: uniqueNotesList(draftOrder.order_notes || []),
-              flags: { needs_confirmation: true },
-              lastMessage: cleanText,
-            }),
-          ),
-        };
+    if (draftOrderMap && hasItemsMap && hasPickupMap && hasAddressMap) {
+      if (draftOrderMap.status !== "PENDING_CONFIRMATION") {
+        await draftOrderMap.update({ status: "PENDING_CONFIRMATION" });
       }
     }
 
     return {
       reply: await makeReply(
-        "LOCATION_RECEIVED",
+        needsOkConfirmMap ? "LOCATION_RECEIVED_CONFIRM" : "LOCATION_RECEIVED",
         buildUserContext({
           user,
-          draftOrder,
-          activeOrder,
-          items: draftOrder?.items_summary || activeOrder?.items_summary || [],
-          pickup: draftOrder?.pickup_address || activeOrder?.pickup_address || "",
-          address: draftOrder?.delivery_address || activeOrder?.delivery_address || "",
-          notes: uniqueNotesList(draftOrder?.order_notes || activeOrder?.order_notes || []),
+          draftOrder: draftOrderMap,
+          activeOrder: activeOrderMap,
+          items: draftOrderMap?.items_summary || activeOrderMap?.items_summary || [],
+          pickup: draftOrderMap?.pickup_address || activeOrderMap?.pickup_address || "",
+          address: draftOrderMap?.delivery_address || activeOrderMap?.delivery_address || "",
+          notes: uniqueNotesList(draftOrderMap?.order_notes || activeOrderMap?.order_notes || []),
+          flags: { needs_confirmation: needsOkConfirmMap },
           lastMessage: cleanText,
         }),
       ),
@@ -713,6 +836,70 @@ export const handleUserMessage = async (
       ? activeOrder.status
       : "NONE";
 
+    // EARLY: Saat menunggu konfirmasi lokasi (Balas OK/Ya), jika user ketik ok/ya — proses order langsung tanpa bergantung intent AI
+    if (
+      sessionDraft.pending_location_confirmation &&
+      isConfirmingText(lowerText) &&
+      draftOrder
+    ) {
+      sessionDraft.location_confirmed = true;
+      sessionDraft.pending_location_confirmation = false;
+      await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
+
+      const validItems =
+        Array.isArray(draftOrder.items_summary) && draftOrder.items_summary.length > 0;
+      const validPickup = draftOrder.pickup_address?.length > 2;
+      const validAddress = draftOrder.delivery_address?.length > 3;
+      const hasLocation =
+        user.latitude != null ||
+        user.longitude != null ||
+        sessionDraft.has_coordinate === true ||
+        (sessionDraft.coordinate && sessionDraft.coordinate.lat != null);
+
+      if (validItems && validPickup && validAddress && hasLocation) {
+        await draftOrder.update({ status: "LOOKING_FOR_DRIVER" });
+        await user.update({
+          address_text: draftOrder.delivery_address,
+          last_order_date: new Date(),
+        });
+        await redisClient.del(redisKey);
+        dispatchService
+          .findDriverForOrder(draftOrder.order_id)
+          .catch((err) => console.error("❌ Dispatch Error:", err));
+        return {
+          reply: await makeReply(
+            "ORDER_CONFIRMED",
+            buildUserContext({
+              user,
+              draftOrder,
+              items: draftOrder.items_summary || [],
+              pickup: draftOrder.pickup_address || "",
+              address: draftOrder.delivery_address || "",
+              notes: uniqueNotesList(draftOrder.order_notes || []),
+              flags: { searching_driver: true },
+              lastMessage: cleanText,
+            }),
+          ),
+        };
+      }
+
+      return {
+        reply: await makeReply(
+          "ORDER_SUMMARY",
+          buildUserContext({
+            user,
+            draftOrder,
+            items: draftOrder.items_summary || [],
+            pickup: draftOrder.pickup_address || "",
+            address: draftOrder.delivery_address || "",
+            notes: uniqueNotesList(draftOrder.order_notes || []),
+            flags: { needs_confirmation: true },
+            lastMessage: cleanText,
+          }),
+        ),
+      };
+    }
+
     const combinedDraft = {
       existing_items: draftOrder?.items_summary || [],
       existing_pickup: draftOrder?.pickup_address || null,
@@ -736,9 +923,18 @@ export const handleUserMessage = async (
     let intent = aiResult?.intent || "";
     let finalReply = "";
 
+    // Fallback: pisah alamat antar vs catatan titip dari teks agar sesuai kolom orders (delivery_address, order_notes)
+    const addressTitipSplit = splitAddressAndTitipNote(cleanText);
+    if (addressTitipSplit) {
+      if (!aiData.delivery_address || isWeakAddress(aiData.delivery_address)) {
+        aiData.delivery_address = addressTitipSplit.delivery_address;
+      }
+      aiData.order_notes = addressTitipSplit.order_notes;
+    }
+
     const baseItems = activeOrder?.items_summary || draftOrder?.items_summary || [];
     const aiItems = Array.isArray(aiData.items) ? aiData.items : [];
-    const mergedItems = aiItems.length ? mergeItems(baseItems, aiItems, cleanText) : baseItems;
+    const mergedItems = aiItems.length ? mergeItems(baseItems, aiItems, cleanText, true) : baseItems;
     const mergedPickup =
       cleanPickupName(aiData.pickup_location) ||
       cleanPickupName(draftOrder?.pickup_address) ||
@@ -754,16 +950,39 @@ export const handleUserMessage = async (
       activeOrder?.delivery_address ||
       null;
 
-    // Override status check intent for common phrases
-    if (
+    // Override status check intent untuk pertanyaan status saja; jangan override bila pesan berisi instruksi catatan (titip/serah terima)
+    const looksLikeStatusQuestion =
       /status/.test(lowerText) ||
       /udah sampai|sudah sampai|sampe mana|sampai mana/.test(lowerText) ||
       /pesanan.*mana/.test(lowerText) ||
       /(total|tagihan).*(berapa|nya)\b/.test(lowerText) ||
       /total\s?tagihan/.test(lowerText) ||
-      /tagihannya/.test(lowerText)
-    ) {
+      /tagihannya/.test(lowerText);
+    const looksLikeOrderNoteInstruction =
+      /titip\s+(aja\s+)?ke\s+/i.test(lowerText) ||
+      /tolong.*(titip|kasih|serah|sampai|pesenan)/i.test(lowerText) ||
+      /kasih\s+pesenan/i.test(lowerText) ||
+      /serah(kan)?\s+(ke|pesenan)/i.test(lowerText) ||
+      /berikan\s+(ke|pesenan)/i.test(lowerText) ||
+      /nanti\s+(tolong|titip)/i.test(lowerText);
+    if (looksLikeStatusQuestion && !looksLikeOrderNoteInstruction) {
       intent = "CHECK_STATUS";
+    }
+    if (
+      looksLikeOrderNoteInstruction &&
+      extractOrderNote(cleanText) &&
+      (activeOrder || draftOrder || sessionDraft.pending_order_update)
+    ) {
+      intent = "UPDATE_ORDER";
+    }
+    // Pelanggan punya order berjalan + kirim item (detail tambahan): anggap sebagai update order, bukan order baru
+    if (
+      activeOrder &&
+      !draftOrder &&
+      aiItems.length > 0 &&
+      ["ORDER_COMPLETE", "ORDER_INCOMPLETE"].includes(intent)
+    ) {
+      intent = "UPDATE_ORDER";
     }
 
     // Jika ada update data, jangan dianggap confirm final
@@ -777,8 +996,8 @@ export const handleUserMessage = async (
       intent = "ORDER_COMPLETE";
     }
 
-    // PENDING LOCATION CONFIRMATION
-    if (sessionDraft.pending_location_confirmation) {
+    // PENDING LOCATION CONFIRMATION — jangan anggap pesan sebagai konfirmasi lokasi bila isinya update order (titip/serah)
+    if (sessionDraft.pending_location_confirmation && !looksLikeOrderNoteInstruction) {
       const asksNewLocation =
         lowerText.includes("sharelok") ||
         lowerText.includes("share lok") ||
@@ -824,7 +1043,10 @@ export const handleUserMessage = async (
             Array.isArray(draftOrder.items_summary) && draftOrder.items_summary.length > 0;
           const validPickup = draftOrder.pickup_address?.length > 2;
           const validAddress = draftOrder.delivery_address?.length > 3;
-          const hasLocation = user.latitude || sessionDraft.has_coordinate;
+          const hasLocation =
+            user.latitude ||
+            sessionDraft.has_coordinate ||
+            (sessionDraft.coordinate && sessionDraft.coordinate.lat != null);
 
           if (validItems && validPickup && validAddress && hasLocation) {
             await draftOrder.update({ status: "LOOKING_FOR_DRIVER" });
@@ -900,12 +1122,14 @@ export const handleUserMessage = async (
       };
     }
 
-    // AUTO-CONFIRM WHEN USER SAYS OK/YA
+    // AUTO-CONFIRM WHEN USER SAYS OK/YA — jangan anggap konfirmasi bila pesan berisi update order (titip/serah) atau ada konfirmasi update tertunda
     if (
       draftOrder &&
       ["PENDING_CONFIRMATION", "DRAFT"].includes(draftOrder.status) &&
       !sessionDraft.pending_location_confirmation &&
-      isConfirmingText(lowerText)
+      !sessionDraft.pending_order_update &&
+      isConfirmingText(lowerText) &&
+      !looksLikeOrderNoteInstruction
     ) {
       const validItems =
         Array.isArray(draftOrder.items_summary) && draftOrder.items_summary.length > 0;
@@ -949,9 +1173,10 @@ export const handleUserMessage = async (
         };
       }
       if (!hasLocation) {
+        const hasSavedAddressFromPreviousOrder = (user.address_text || "").trim().length > 3;
         return {
           reply: await makeReply(
-            "REQUEST_LOCATION",
+            hasSavedAddressFromPreviousOrder ? "REQUEST_LOCATION_CONFIRM_ADDRESS" : "REQUEST_LOCATION",
             buildUserContext({
               user,
               draftOrder,
@@ -959,7 +1184,10 @@ export const handleUserMessage = async (
               pickup: draftOrder.pickup_address || "",
               address: draftOrder.delivery_address || "",
               notes: uniqueNotesList(draftOrder.order_notes || []),
-              flags: { needs_location: true },
+              flags: {
+                needs_location: true,
+                ...(hasSavedAddressFromPreviousOrder && { last_address: user.address_text }),
+              },
               lastMessage: cleanText,
             }),
             [LOCATION_INSTRUCTION],
@@ -969,6 +1197,7 @@ export const handleUserMessage = async (
       if (!sessionDraft.location_confirmed && user.latitude && user.longitude) {
         sessionDraft.pending_location_confirmation = true;
         await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
+        const hasSavedAddress = (user.address_text || "").trim().length > 0;
         const followup = await makeReply(
           "CONFIRM_SAVED_LOCATION",
           buildUserContext({
@@ -978,7 +1207,10 @@ export const handleUserMessage = async (
             pickup: draftOrder.pickup_address || "",
             address: draftOrder.delivery_address || "",
             notes: uniqueNotesList(draftOrder.order_notes || []),
-            flags: { pending_location_confirmation: true },
+            flags: {
+              pending_location_confirmation: true,
+              confirm_address_same: hasSavedAddress,
+            },
             lastMessage: cleanText,
           }),
         );
@@ -1027,12 +1259,17 @@ export const handleUserMessage = async (
         /(total|tagihan).*(berapa|nya)\b/.test(lowerText) ||
         /total\s?tagihan/.test(lowerText) ||
         /tagihannya/.test(lowerText);
-      const wantsOrderDetails = /(detail|rincian|ringkasan|menu|item|daftar)/i.test(lowerText);
+      const wantsOrderDetails = /(detail|rincian|ringkasan|menu|item|daftar|orderan|\border\b)/i.test(
+        lowerText,
+      );
       if (activeOrder) {
-        const totalAllowed = ["BILL_VALIDATION", "BILL_SENT", "COMPLETED"].includes(
-          activeOrder.status,
-        );
-        const rawTotal = Number(activeOrder.total_amount || 0);
+        const freshOrder = await Order.findOne({
+          where: { order_id: activeOrder.order_id },
+          include: [{ model: Courier, as: "courier" }],
+        });
+        const orderForReply = freshOrder || activeOrder;
+        const totalAllowed = ["BILL_SENT", "COMPLETED"].includes(orderForReply.status);
+        const rawTotal = Number(orderForReply.total_amount || 0);
         const totalPhrase =
           asksTotalTagihan && totalAllowed
             ? `Total tagihan: Rp${Math.round(rawTotal).toLocaleString("id-ID")}`
@@ -1043,22 +1280,22 @@ export const handleUserMessage = async (
               "TOTAL_NOT_READY",
               buildUserContext({
                 user,
-                activeOrder,
-                items: activeOrder.items_summary || [],
-                pickup: activeOrder.pickup_address || "",
-                address: activeOrder.delivery_address || "",
-                notes: uniqueNotesList(activeOrder.order_notes || []),
-                flags: { status: activeOrder.status, show_details: false },
+                activeOrder: orderForReply,
+                items: orderForReply.items_summary || [],
+                pickup: orderForReply.pickup_address || "",
+                address: orderForReply.delivery_address || "",
+                notes: uniqueNotesList(orderForReply.order_notes || []),
+                flags: { status: orderForReply.status, show_details: false },
                 lastMessage: cleanText,
               }),
             ),
           };
         }
         if (
-          activeOrder.courier &&
-          activeOrder.courier.current_latitude &&
-          activeOrder.courier.current_longitude &&
-          ["ON_PROCESS", "BILL_VALIDATION", "BILL_SENT"].includes(activeOrder.status)
+          orderForReply.courier &&
+          orderForReply.courier.current_latitude &&
+          orderForReply.courier.current_longitude &&
+          ["ON_PROCESS", "BILL_VALIDATION", "BILL_SENT"].includes(orderForReply.status)
         ) {
           const statusKey =
             asksTotalTagihan && totalAllowed ? "TOTAL_WITH_LOCATION" : "STATUS_WITH_LOCATION";
@@ -1066,12 +1303,12 @@ export const handleUserMessage = async (
             statusKey,
             buildUserContext({
               user,
-              activeOrder,
-              items: activeOrder.items_summary || [],
-              pickup: activeOrder.pickup_address || "",
-              address: activeOrder.delivery_address || "",
-              notes: uniqueNotesList(activeOrder.order_notes || []),
-              flags: { status: activeOrder.status, show_details: wantsOrderDetails },
+              activeOrder: orderForReply,
+              items: orderForReply.items_summary || [],
+              pickup: orderForReply.pickup_address || "",
+              address: orderForReply.delivery_address || "",
+              notes: uniqueNotesList(orderForReply.order_notes || []),
+              flags: { status: orderForReply.status, show_details: wantsOrderDetails },
               lastMessage: cleanText,
             }),
             totalPhrase ? [totalPhrase] : [],
@@ -1079,9 +1316,9 @@ export const handleUserMessage = async (
           sendFollowupMessage(user.phone, followup);
           return {
             type: "location",
-            latitude: parseFloat(activeOrder.courier.current_latitude),
-            longitude: parseFloat(activeOrder.courier.current_longitude),
-            address: activeOrder.delivery_address || "",
+            latitude: parseFloat(orderForReply.courier.current_latitude),
+            longitude: parseFloat(orderForReply.courier.current_longitude),
+            address: orderForReply.delivery_address || "",
             reply: "",
           };
         }
@@ -1091,15 +1328,16 @@ export const handleUserMessage = async (
             asksTotalTagihan && totalAllowed ? "TOTAL_STATUS" : "STATUS_ONLY",
             buildUserContext({
               user,
-              activeOrder,
-              items: activeOrder.items_summary || [],
-              pickup: activeOrder.pickup_address || "",
-              address: activeOrder.delivery_address || "",
-              notes: uniqueNotesList(activeOrder.order_notes || []),
+              activeOrder: orderForReply,
+              items: orderForReply.items_summary || [],
+              pickup: orderForReply.pickup_address || "",
+              address: orderForReply.delivery_address || "",
+              notes: uniqueNotesList(orderForReply.order_notes || []),
               flags: {
-                status: activeOrder.status,
+                status: orderForReply.status,
                 show_details: wantsOrderDetails,
-                total_amount: asksTotalTagihan ? activeOrder.total_amount || 0 : undefined,
+                total_amount:
+                  asksTotalTagihan && totalAllowed ? orderForReply.total_amount || 0 : undefined,
               },
               lastMessage: cleanText,
             }),
@@ -1185,7 +1423,6 @@ export const handleUserMessage = async (
         }
 
         sessionDraft.pending_order_update = null;
-        await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
 
         const combinedUpdateNotes = [
           ...(freshOrder.order_notes || []),
@@ -1197,6 +1434,44 @@ export const handleUserMessage = async (
           last_message: pendingUpdate.raw_message || cleanText,
         });
 
+        const isDraftAfterUpdate =
+          freshOrder && ["DRAFT", "PENDING_CONFIRMATION"].includes(freshOrder.status);
+        const hasLocation =
+          user.latitude ||
+          user.longitude ||
+          sessionDraft.has_coordinate ||
+          (sessionDraft.coordinate && sessionDraft.coordinate.lat != null);
+        if (isDraftAfterUpdate && hasLocation) {
+          sessionDraft.pending_location_confirmation = true;
+          await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
+          const hasSavedAddressReturning = (user.address_text || "").trim().length > 0;
+          const followup = await makeReply(
+            "CONFIRM_SAVED_LOCATION",
+            buildUserContext({
+              user,
+              draftOrder: freshOrder,
+              items: freshOrder.items_summary || [],
+              pickup: freshOrder.pickup_address || "",
+              address: freshOrder.delivery_address || "",
+              notes: uniqueNotesList(combinedUpdateNotes),
+              flags: {
+                pending_location_confirmation: true,
+                confirm_address_same: hasSavedAddressReturning,
+              },
+              lastMessage: cleanText,
+            }),
+          );
+          sendFollowupMessage(user.phone, followup);
+          return {
+            type: "location",
+            latitude: user.latitude ? parseFloat(user.latitude) : sessionDraft.coordinate?.lat,
+            longitude: user.longitude ? parseFloat(user.longitude) : sessionDraft.coordinate?.lng,
+            address: freshOrder.delivery_address || "",
+            reply: "",
+          };
+        }
+
+        await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
         return {
           reply: await makeReply(
             "ORDER_UPDATE_APPLIED",
@@ -1286,7 +1561,7 @@ export const handleUserMessage = async (
           newItems = removeItemsByName(newItems, removeNames);
           itemsUpdated = true;
         } else if (aiItems.length) {
-          newItems = mergeItems(newItems, aiItems, cleanText);
+          newItems = mergeItems(newItems, aiItems, cleanText, true);
           itemsUpdated = true;
         }
 
@@ -1491,8 +1766,39 @@ export const handleUserMessage = async (
       };
     }
 
-    // POLITE RESPONSE
-    if (intent === "CHITCHAT" && isPolite(lowerText) && !draftOrder) {
+    // INTRO PEMESANAN: pelanggan baru mau pesan (tanpa detail) -> minta tulis pesanan lengkap. Jangan tampilkan jika pesan sudah berisi item+jumlah (biarkan flow ORDER_INCOMPLETE/ORDER_COMPLETE yang tangani).
+    const looksLikeHasItemAndQty =
+      (/\d+\s*(porsi|gelas|buah|pcs|rb|ribu|k)\b/i.test(lowerText) ||
+        /\b(satu|dua|se)\s*(porsi|gelas|buah)/i.test(lowerText)) &&
+      /(nasi|mie|goreng|teh|kopi|es|ayam|bakso|soto|pedas|manis|pizza|burger|nasgor|pisgor|porsi)/i.test(lowerText);
+    if (
+      intent === "CHITCHAT" &&
+      (isPolite(lowerText) || isGreeting(lowerText)) &&
+      isIntroToOrder(lowerText) &&
+      !draftOrder &&
+      !activeOrder &&
+      !aiItems.length &&
+      !looksLikeHasItemAndQty
+    ) {
+      return {
+        reply: await makeReply(
+          "ORDER_INTRO_ASK_DETAILS",
+          buildUserContext({
+            user,
+            activeOrder,
+            items: [],
+            pickup: "",
+            address: "",
+            notes: [],
+            flags: { intro_to_order: true },
+            lastMessage: cleanText,
+          }),
+        ),
+      };
+    }
+
+    // POLITE RESPONSE (sapaan + ucapan sopan)
+    if (intent === "CHITCHAT" && (isPolite(lowerText) || isGreeting(lowerText)) && !draftOrder) {
       return {
         reply: await makeReply(
           "POLITE_RESPONSE",
@@ -1605,7 +1911,10 @@ export const handleUserMessage = async (
       draftOrder && ["DRAFT", "PENDING_CONFIRMATION"].includes(draftOrder.status);
 
     if (
-      (activeOrder || sessionDraft.pending_addon_details || (!isDraftEditable && draftOrder)) &&
+      (activeOrder ||
+        sessionDraft.pending_addon_details ||
+        (!isDraftEditable && draftOrder) ||
+        (draftOrder && intent === "UPDATE_ORDER")) &&
       shouldUpdateOrder
     ) {
       const targetOrder = activeOrder || draftOrder;
@@ -1651,7 +1960,6 @@ export const handleUserMessage = async (
       let addressUpdateBlocked = false;
       let pickupUpdateBlocked = false;
       const canUpdateAddress = ["DRAFT", "PENDING_CONFIRMATION"].includes(targetOrder.status);
-      const needsUpdateConfirmation = !["DRAFT", "PENDING_CONFIRMATION"].includes(targetOrder.status);
       let newItems = Array.isArray(targetOrder.items_summary) ? targetOrder.items_summary : [];
       let updateNotes = [];
       const noteCandidate = extractOrderNote(cleanText);
@@ -1668,7 +1976,7 @@ export const handleUserMessage = async (
         updated = true;
         itemsUpdated = true;
       } else if (aiItems.length) {
-        newItems = mergeItems(newItems, aiItems, cleanText);
+        newItems = mergeItems(newItems, aiItems, cleanText, true);
         updated = true;
         itemsUpdated = true;
       }
@@ -1705,6 +2013,15 @@ export const handleUserMessage = async (
       }
 
       if (updated) {
+        const isDraftStatus = ["DRAFT", "PENDING_CONFIRMATION"].includes(targetOrder.status);
+        const notesOnlyUpdate =
+          notesUpdated &&
+          !itemsUpdated &&
+          !addressUpdated &&
+          !pickupUpdated &&
+          !wantsRemoveNote;
+        const needsUpdateConfirmation =
+          !isDraftStatus || (isDraftStatus && notesOnlyUpdate);
         const updateItemsPreview = (() => {
           if (wantsRemoveItem) {
             const removeNames = aiData.remove_items?.length
@@ -1861,7 +2178,10 @@ export const handleUserMessage = async (
       const validItems = Array.isArray(draftOrder.items_summary) && draftOrder.items_summary.length > 0;
       const validPickup = draftOrder.pickup_address?.length > 2;
       const validAddress = draftOrder.delivery_address?.length > 3;
-      const hasLocation = user.latitude || sessionDraft.has_coordinate;
+      const hasLocation =
+        user.latitude ||
+        sessionDraft.has_coordinate ||
+        (sessionDraft.coordinate && sessionDraft.coordinate.lat != null);
       const isConfirming = isConfirmingText(lowerText);
 
       if (!validItems) {
@@ -1900,9 +2220,10 @@ export const handleUserMessage = async (
         };
       }
       if (!hasLocation) {
+        const hasSavedAddressFromPreviousOrder = (user.address_text || "").trim().length > 3;
         return {
           reply: await makeReply(
-            "REQUEST_LOCATION",
+            hasSavedAddressFromPreviousOrder ? "REQUEST_LOCATION_CONFIRM_ADDRESS" : "REQUEST_LOCATION",
             buildUserContext({
               user,
               draftOrder,
@@ -1910,7 +2231,10 @@ export const handleUserMessage = async (
               pickup: draftOrder.pickup_address || "",
               address: draftOrder.delivery_address || "",
               notes: uniqueNotesList(draftOrder.order_notes || []),
-              flags: { needs_location: true },
+              flags: {
+                needs_location: true,
+                ...(hasSavedAddressFromPreviousOrder && { last_address: user.address_text }),
+              },
               lastMessage: cleanText,
             }),
             [LOCATION_INSTRUCTION],
@@ -1918,15 +2242,20 @@ export const handleUserMessage = async (
         };
       }
 
-      if (isConfirming && !sessionDraft.location_confirmed && user.latitude && user.longitude) {
+      if (isConfirming && !sessionDraft.location_confirmed && hasLocation) {
         sessionDraft.location_confirmed = true;
         sessionDraft.pending_location_confirmation = false;
         await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
       }
 
-      if (!sessionDraft.location_confirmed && user.latitude && user.longitude) {
+      if (
+        !sessionDraft.location_confirmed &&
+        hasLocation &&
+        !looksLikeOrderNoteInstruction
+      ) {
         sessionDraft.pending_location_confirmation = true;
         await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
+        const hasSavedAddressReturning = (user.address_text || "").trim().length > 0;
         const followup = await makeReply(
           "CONFIRM_SAVED_LOCATION",
           buildUserContext({
@@ -1936,7 +2265,10 @@ export const handleUserMessage = async (
             pickup: draftOrder.pickup_address || "",
             address: draftOrder.delivery_address || "",
             notes: uniqueNotesList(draftOrder.order_notes || []),
-            flags: { pending_location_confirmation: true },
+            flags: {
+              pending_location_confirmation: true,
+              confirm_address_same: hasSavedAddressReturning,
+            },
             lastMessage: cleanText,
           }),
         );
@@ -1982,6 +2314,7 @@ export const handleUserMessage = async (
     // DRAFT / ORDER CREATION
     if (["ORDER_INCOMPLETE", "ORDER_COMPLETE", "UPDATE_ORDER"].includes(intent)) {
       if (!draftOrder && activeOrder) {
+        const orderUpdateBlocked = ["BILL_SENT", "COMPLETED"].includes(activeOrder.status);
         return {
           reply: await makeReply(
             "ORDER_IN_PROGRESS",
@@ -1992,6 +2325,10 @@ export const handleUserMessage = async (
               pickup: activeOrder.pickup_address || "",
               address: activeOrder.delivery_address || "",
               notes: uniqueNotesList(activeOrder.order_notes || []),
+              flags: {
+                order_update_blocked: orderUpdateBlocked,
+                order_status: activeOrder.status,
+              },
               lastMessage: cleanText,
             }),
           ),
@@ -2124,7 +2461,7 @@ export const handleUserMessage = async (
     }
 
     if (intent === "CHITCHAT") {
-      const status = isPolite(lowerText) ? "CHITCHAT" : "OUT_OF_SCOPE";
+      const status = (isPolite(lowerText) || isGreeting(lowerText)) ? "CHITCHAT" : "OUT_OF_SCOPE";
       return {
         reply: await makeReply(
           status,

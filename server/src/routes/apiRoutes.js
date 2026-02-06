@@ -16,7 +16,13 @@ import {
 } from "../controllers/courierController.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
 import { restrictTo } from "../middleware/roleMiddleware.js";
-import { getAllOrders, getOrderById, updateOrder } from "../controllers/orderController.js";
+import {
+  getAllOrders,
+  getOrderById,
+  updateOrder,
+  getCustomers,
+  createOrderByAdmin,
+} from "../controllers/orderController.js";
 import {
   getNotifications,
   markAllAsRead,
@@ -50,8 +56,10 @@ router.get("/dashboard/chart", getChartData);
 
 // Orders Monitor
 router.get("/orders", getAllOrders);
+router.get("/orders/customers", getCustomers);
 router.get("/orders/:id", getOrderById);
 router.put("/orders/:id", restrictTo("SUPER_ADMIN", "CS"), updateOrder);
+router.post("/orders/by-admin", restrictTo("SUPER_ADMIN", "CS"), createOrderByAdmin);
 
 // INTERVENTION ROUTES
 router.get("/intervention/sessions", getActiveSessions);

@@ -40,6 +40,81 @@ class OrderService {
     return `K${Math.floor(1000 + Math.random() * 9000)}`;
   }
 
+  /**
+   * Buat order oleh admin (intervensi manual). Status langsung LOOKING_FOR_DRIVER.
+   * Jika user_phone belum ada di User, akan dibuat user baru.
+   */
+  async createByAdmin(payload) {
+    const {
+      user_phone,
+      customer_name,
+      pickup_address,
+      delivery_address,
+      items_summary,
+      order_notes,
+      latitude,
+      longitude,
+    } = payload;
+
+    const normalizedPhone = String(user_phone || "").trim();
+    if (!normalizedPhone) {
+      throw new Error("Nomor HP pelanggan wajib diisi.");
+    }
+
+    let user = await User.findByPk(normalizedPhone);
+    if (!user) {
+      user = await User.create({
+        phone: normalizedPhone,
+        name: (customer_name || "").trim() || "Pelanggan",
+        ...(latitude != null && longitude != null && !Number.isNaN(Number(latitude)) && !Number.isNaN(Number(longitude))
+          ? { latitude: Number(latitude), longitude: Number(longitude) }
+          : {}),
+      });
+    } else {
+      const updates = {};
+      if (customer_name && String(customer_name).trim()) updates.name = String(customer_name).trim();
+      if (latitude != null && longitude != null && !Number.isNaN(Number(latitude)) && !Number.isNaN(Number(longitude))) {
+        updates.latitude = Number(latitude);
+        updates.longitude = Number(longitude);
+      }
+      if (Object.keys(updates).length) await user.update(updates);
+    }
+
+    const orderId = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const shortCode = await this.generateShortCode();
+
+    const notesArray = Array.isArray(order_notes)
+      ? order_notes
+          .map((n) => (typeof n === "string" ? n : n?.note))
+          .filter(Boolean)
+          .map((note) => ({ note, at: new Date().toISOString() }))
+      : [];
+
+    const items = Array.isArray(items_summary)
+      ? items_summary.map((i) => ({
+          item: i.item || "Item",
+          qty: Number(i.qty) || 1,
+          note: i.note || "",
+        }))
+      : [];
+
+    const newOrder = await Order.create({
+      order_id: orderId,
+      short_code: shortCode,
+      user_phone: user.phone,
+      raw_message: "Order dibuat oleh admin",
+      items_summary: items,
+      order_notes: notesArray,
+      pickup_address: pickup_address || "",
+      delivery_address: delivery_address || "",
+      total_amount: 0,
+      status: "LOOKING_FOR_DRIVER",
+    });
+
+    console.log(`✅ Order by Admin: ${newOrder.order_id} for ${user.phone}`);
+    return { order: newOrder, user };
+  }
+
   // KURIR MENGAMBIL ORDER
   async takeOrder(orderIdString, courierId) {
     const transaction = await sequelize.transaction();

@@ -10,6 +10,15 @@ import logger from "../utils/logger.js";
 
 const sanitizeId = (id) => (id ? id.split("@")[0] : "");
 
+/** Memastikan nomor punya record di users (untuk FK chat_sessions). Buat user minimal jika belum ada. */
+const ensureUserForPhone = async (phone, defaultName = "User") => {
+  let user = await User.findOne({ where: { phone } });
+  if (!user) {
+    user = await User.create({ phone, name: defaultName });
+  }
+  return user;
+};
+
 const buildPhoneCandidates = (rawPhone) => {
   const candidates = new Set();
   if (!rawPhone) return [];
@@ -302,6 +311,65 @@ export const handleIncomingMessage = async (req, res) => {
         );
       }
 
+      // ChatSession untuk Kurir (intervention / #HUMAN) — butuh user agar FK chat_sessions.phone → users.phone terpenuhi
+      const courierPhoneNorm = sanitizePhoneNumber(courier.phone) || courier.phone;
+      await ensureUserForPhone(courierPhoneNorm, courier.name || "Kurir");
+      let courierSession = await ChatSession.findOne({ where: { phone: courierPhoneNorm } });
+      if (!courierSession) {
+        courierSession = await ChatSession.create({
+          phone: courierPhoneNorm,
+          mode: "BOT",
+          last_interaction: new Date(),
+        });
+      }
+
+      // #HUMAN: beralih ke mode human (tanpa batasan waktu)
+      if (upperBody === "#HUMAN") {
+        await courierSession.update({ mode: "HUMAN", is_paused_until: null, last_interaction: new Date() });
+        await createSystemNotification(req.io, {
+          title: "Kurir meminta Human Mode (#HUMAN)",
+          message: `${courier.name || "Kurir"} (${courier.phone}) meminta beralih ke human mode. Silakan balas dari dashboard.`,
+          type: "HUMAN_HANDOFF",
+          referenceId: courier.phone,
+          actionUrl: "/dashboard/chat",
+          extraData: { userName: courier.name || "Kurir" },
+        });
+        return res.json(
+          createN8nResponse(
+            rawSenderId,
+            "Sip, percakapan sudah dialihkan ke tim kami. Admin akan segera membalas ya. Terima kasih! 🙏",
+          ),
+        );
+      }
+
+      // Mode HUMAN / Paused → bot diam, forward ke admin
+      const isCourierHumanMode = courierSession.mode === "HUMAN";
+      const courierPausedUntil = courierSession.is_paused_until;
+      const isCourierPaused = courierPausedUntil && new Date(courierPausedUntil) > new Date();
+      if (isCourierHumanMode || isCourierPaused) {
+        await TrainingData.create({
+          user_question: messageBody,
+          admin_answer: null,
+          category: "HUMAN_INTERVENTION",
+          source: `WHATSAPP_COURIER_${courier.phone}`,
+        });
+        if (req.io) {
+          req.io.emit("intervention-message", {
+            phone: courier.phone,
+            user_name: courier.name,
+            text: messageBody,
+            sender: "COURIER",
+            timestamp: new Date(),
+            mode: "HUMAN",
+          });
+        }
+        return res.status(200).json({ status: "forwarded_to_admin" });
+      }
+
+      if (courierSession.is_paused_until && new Date(courierSession.is_paused_until) <= new Date()) {
+        await courierSession.update({ is_paused_until: null, mode: "BOT" });
+      }
+
       // Handle Pesan Kurir
       const courierReply = await handleCourierMessage(
         courier,
@@ -349,6 +417,19 @@ export const handleIncomingMessage = async (req, res) => {
         },
       });
 
+      // Pelanggan baru: wajib kirim nomor HP dulu. Jika belum terdaftar dan pesan bukan nomor HP valid, langsung balas minta registrasi.
+      if (!existingUser) {
+        const phoneFromMessage = sanitizePhoneNumber(messageBody);
+        if (!phoneFromMessage) {
+          return res.json(
+            createN8nResponse(
+              rawSenderId,
+              `👋 Halo Kak! Selamat datang di MyJek, aplikasi pesan - antar online 😃.\n\nKarena ini pertama kali chat, mohon kirim nomor HP dulu ya.\nContohnya ketik: 08123456789`,
+            ),
+          );
+        }
+      }
+
       if (!existingUser && sanitizePhoneNumber(messageBody)) {
         const phoneInput = sanitizePhoneNumber(messageBody);
         existingUser = await User.findOne({ where: { phone: phoneInput } });
@@ -374,10 +455,28 @@ export const handleIncomingMessage = async (req, res) => {
           if (!session) {
             session = await ChatSession.create({
               phone: existingUser.phone,
-              user_name: existingUser.name,
               mode: "BOT",
               last_interaction: new Date(),
             });
+          }
+
+          // #HUMAN: beralih ke mode human (tanpa batasan waktu)
+          if (upperBody === "#HUMAN") {
+            await session.update({ mode: "HUMAN", is_paused_until: null, last_interaction: new Date() });
+            await createSystemNotification(req.io, {
+              title: "Pelanggan meminta Human Mode (#HUMAN)",
+              message: `${existingUser.name || "Pelanggan"} (${existingUser.phone}) meminta beralih ke human mode. Silakan balas dari dashboard.`,
+              type: "HUMAN_HANDOFF",
+              referenceId: existingUser.phone,
+              actionUrl: "/dashboard/chat",
+              extraData: { userName: existingUser.name || "Pelanggan" },
+            });
+            return res.json(
+              createN8nResponse(
+                rawSenderId,
+                "Sip kak, percakapan sudah dialihkan ke tim kami. Admin akan segera membalas pesan kakak ya. Terima kasih! 🙏",
+              ),
+            );
           }
 
           // Cek Kondisi "DIAM" (Human Mode atau Paused)
@@ -499,18 +598,20 @@ export const handleIncomingMessage = async (req, res) => {
 
     // AUTOMATIC HANDOFF SAAT ERROR
     try {
-      // Identifikasi Nomor HP User dari body request (karena variabel existingUser mungkin undefined jika error di awal)
+      // Identifikasi Nomor HP dari body request (bisa user atau kurir)
       const rawId = req.body?.payload?.from || req.body?.payload?.chatId || "";
       const phone = sanitizePhoneNumber(sanitizeId(rawId));
 
       if (phone) {
-        // Update Mode ke HUMAN di Database
-        // Kita cari atau buat sesi darurat jika belum ada
+        // ChatSession butuh FK ke users: pastikan ada record users untuk nomor ini (buat minimal jika belum)
+        const courierByPhone = await Courier.findOne({ where: { phone } });
+        const displayName = courierByPhone?.name || "User";
+        const user = await ensureUserForPhone(phone, displayName);
+
         let session = await ChatSession.findOne({ where: { phone } });
         if (!session) {
           session = await ChatSession.create({
             phone,
-            user_name: "User",
             mode: "BOT",
             last_interaction: new Date(),
           });
@@ -523,14 +624,13 @@ export const handleIncomingMessage = async (req, res) => {
           is_paused_until: pauseUntil,
         });
 
-        // Kirim Notifikasi & Email ke Admin
         await createSystemNotification(req.io, {
           title: "SYSTEM CRASH: Bot Gagal Memproses Pesan!",
-          message: `Terjadi error kritis pada Bot: "${error.message}". Mode otomatis dialihkan ke HUMAN untuk user ${phone}. Segera lakukan tindakan atau chat user tersebut untuk dibantu!`,
+          message: `Terjadi error kritis pada Bot: "${error.message}". Mode otomatis dialihkan ke HUMAN untuk ${displayName} (${phone}). Segera lakukan tindakan atau chat untuk dibantu!`,
           type: "HUMAN_HANDOFF",
           referenceId: phone,
           actionUrl: `/dashboard/chat`,
-          extraData: { userName: session.user_name || "User" },
+          extraData: { userName: user.name || displayName },
         });
 
         logger.info(`Emergency Handoff triggered for ${phone}`);

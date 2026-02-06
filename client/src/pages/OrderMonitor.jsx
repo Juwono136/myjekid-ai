@@ -1,7 +1,14 @@
 import { useEffect, useState, useCallback } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import toast from "react-hot-toast";
-import { fetchOrders, updateOrderDetail, fetchOrderDetail, clearOrderDetail } from "../features/orderSlice";
+import {
+  fetchOrders,
+  updateOrderDetail,
+  fetchOrderDetail,
+  clearOrderDetail,
+  fetchCustomers,
+  createOrderByAdmin,
+} from "../features/orderSlice";
 import useDebounce from "../hooks/useDebounce";
 
 import PageHeader from "../components/common/PageHeader";
@@ -10,10 +17,20 @@ import Pagination from "../components/common/Pagination";
 import OrderTable from "../components/orders/OrderTable";
 import OrderDetailModal from "../components/orders/OrderDetailModal";
 import OrderEditModal from "../components/orders/OrderEditModal";
+import OrderAddModal from "../components/orders/OrderAddModal";
 
 const OrderMonitor = () => {
   const dispatch = useDispatch();
-  const { orders, pagination, isLoading, orderDetail, isDetailLoading } = useSelector((state) => state.orders);
+  const {
+    orders,
+    pagination,
+    isLoading,
+    orderDetail,
+    isDetailLoading,
+    customers,
+    isCustomersLoading,
+    isCreateByAdminLoading,
+  } = useSelector((state) => state.orders);
   const { user } = useSelector((state) => state.auth);
 
   const [searchTerm, setSearchTerm] = useState("");
@@ -36,6 +53,7 @@ const OrderMonitor = () => {
     isOpen: false,
     orderId: null,
   });
+  const [addModalOpen, setAddModalOpen] = useState(false);
 
   useEffect(() => {
     setParams((prev) => ({ ...prev, search: debouncedSearch, page: 1 }));
@@ -59,6 +77,10 @@ const OrderMonitor = () => {
     }
   }, [dispatch, editModal.isOpen, editModal.orderId]);
 
+  useEffect(() => {
+    if (addModalOpen) dispatch(fetchCustomers());
+  }, [dispatch, addModalOpen]);
+
   const handleSortChange = (value) => {
     const [sortBy, sortOrder] = value.split("-");
     setParams((prev) => ({ ...prev, sortBy, sortOrder }));
@@ -79,6 +101,8 @@ const OrderMonitor = () => {
       <PageHeader
         title="Order Monitor"
         description="Pantau seluruh transaksi customer secara real-time."
+        btnLabel={["SUPER_ADMIN", "CS"].includes(user?.role) ? "Tambah Order" : undefined}
+        onBtnClick={["SUPER_ADMIN", "CS"].includes(user?.role) ? () => setAddModalOpen(true) : undefined}
       />
 
       <TableActions
@@ -95,7 +119,7 @@ const OrderMonitor = () => {
         ]}
       >
         <select
-          className="select select-bordered rounded-xl w-full sm:w-48 text-sm focus:border-[#f14c06] focus:outline-none"
+          className="select select-bordered rounded-xl w-full sm:w-44 text-sm focus:border-[#f14c06] focus:outline-none h-11"
           value={params.status}
           onChange={(e) => setParams((prev) => ({ ...prev, status: e.target.value, page: 1 }))}
         >
@@ -146,6 +170,24 @@ const OrderMonitor = () => {
             fetchData();
           } catch (error) {
             toast.error(error || "Gagal memperbarui order.");
+          }
+        }}
+      />
+
+      <OrderAddModal
+        isOpen={addModalOpen}
+        onClose={() => setAddModalOpen(false)}
+        customers={customers}
+        isCustomersLoading={isCustomersLoading}
+        isLoading={isCreateByAdminLoading}
+        onSubmit={async (payload) => {
+          try {
+            await dispatch(createOrderByAdmin(payload)).unwrap();
+            toast.success("Order berhasil dibuat. Notifikasi dikirim ke pelanggan dan kurir.");
+            setAddModalOpen(false);
+            fetchData();
+          } catch (error) {
+            toast.error(error || "Gagal membuat order.");
           }
         }}
       />

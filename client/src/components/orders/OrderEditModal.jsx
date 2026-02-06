@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { FiPlus, FiTrash2, FiX } from "react-icons/fi";
+import { FiPlus, FiTrash2, FiX, FiMapPin } from "react-icons/fi";
 import { courierService } from "../../services/courierService";
+import OrderLocationMap from "./OrderLocationMap.jsx";
 
 const EDITABLE_STATUSES = [
   "DRAFT",
@@ -14,8 +15,10 @@ const OrderEditModal = ({ isOpen, onClose, order, onSubmit, isLoading }) => {
   const [formData, setFormData] = useState({
     pickup_address: "",
     delivery_address: "",
+    latitude: null,
+    longitude: null,
     items: [],
-    notesText: "",
+    notesList: [""],
     courier_id: "",
   });
   const [idleCouriers, setIdleCouriers] = useState([]);
@@ -45,9 +48,13 @@ const OrderEditModal = ({ isOpen, onClose, order, onSubmit, isLoading }) => {
           .filter(Boolean)
       : [];
 
+    const lat = order.user?.latitude != null ? Number(order.user.latitude) : null;
+    const lng = order.user?.longitude != null ? Number(order.user.longitude) : null;
     setFormData({
       pickup_address: order.pickup_address || "",
       delivery_address: order.delivery_address || "",
+      latitude: lat,
+      longitude: lng,
       items:
         parsedItems.length > 0
           ? parsedItems.map((item) => ({
@@ -56,7 +63,7 @@ const OrderEditModal = ({ isOpen, onClose, order, onSubmit, isLoading }) => {
               note: item.note || "",
             }))
           : [{ item: "", qty: 1, note: "" }],
-      notesText: parsedNotes.join("\n"),
+      notesList: parsedNotes.length > 0 ? parsedNotes : [""],
       courier_id: order.courier?.id || "",
     });
   }, [isOpen, order]);
@@ -92,6 +99,20 @@ const OrderEditModal = ({ isOpen, onClose, order, onSubmit, isLoading }) => {
       items: prev.items.filter((_, idx) => idx !== index),
     }));
 
+  const updateNote = (index, value) =>
+    setFormData((prev) => {
+      const list = [...prev.notesList];
+      list[index] = value;
+      return { ...prev, notesList: list };
+    });
+  const addNoteRow = () =>
+    setFormData((prev) => ({ ...prev, notesList: [...prev.notesList, ""] }));
+  const removeNoteRow = (index) =>
+    setFormData((prev) => ({
+      ...prev,
+      notesList: prev.notesList.filter((_, i) => i !== index),
+    }));
+
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!order) return;
@@ -106,34 +127,46 @@ const OrderEditModal = ({ isOpen, onClose, order, onSubmit, isLoading }) => {
           note: item.note?.trim() || "",
         }))
         .filter((item) => item.item),
-      order_notes: formData.notesText
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean),
+      order_notes: formData.notesList.map((line) => line.trim()).filter(Boolean),
     };
-
+    if (formData.latitude != null && formData.longitude != null && !Number.isNaN(formData.latitude) && !Number.isNaN(formData.longitude)) {
+      payload.latitude = formData.latitude;
+      payload.longitude = formData.longitude;
+    }
     if (allowAssignCourier && formData.courier_id) {
       payload.courier_id = formData.courier_id;
     }
-
     onSubmit(payload);
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="modal modal-open bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center px-4 py-6">
-      <div className="modal-box w-full max-w-4xl p-0 overflow-hidden rounded-2xl shadow-2xl relative max-h-[92vh]">
-        <div className="bg-gray-50 px-4 sm:px-6 py-4 border-b border-gray-100 flex sm:flex-row justify-between sm:items-center gap-2">
+    <div className="modal modal-open bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-6">
+      <div className="modal-box w-full max-w-4xl p-0 overflow-hidden rounded-2xl shadow-2xl relative max-h-[92vh] flex flex-col">
+        <div className="bg-gradient-to-r from-gray-700 to-gray-800 px-4 sm:px-6 py-4 border-b border-gray-600 flex flex-row justify-between items-start gap-2 shrink-0">
           <div>
-            <h3 className="font-bold text-lg text-gray-800">Edit Order</h3>
-            <p className="text-xs text-gray-500 font-mono mt-1">
+            <h3 className="font-bold text-lg text-white">Edit Order</h3>
+            <p className="text-xs text-gray-300 font-mono mt-1">
               Ref ID: {order?.order_id || "-"}
             </p>
+            {order?.user_phone && (
+              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-sm text-gray-200">
+                <span>
+                  <span className="font-semibold text-gray-400">Pelanggan:</span>{" "}
+                  {order?.user?.name || "-"}
+                </span>
+                <span>
+                  <span className="font-semibold text-gray-400">No. HP:</span>{" "}
+                  <span className="font-mono">{order?.user_phone}</span>
+                </span>
+              </div>
+            )}
           </div>
           <button
             onClick={onClose}
-            className="btn btn-sm btn-circle btn-ghost text-gray-400 hover:bg-gray-200"
+            className="btn btn-sm btn-circle btn-ghost text-gray-300 hover:bg-white/10"
+            aria-label="Tutup"
           >
             <FiX size={18} />
           </button>
@@ -141,7 +174,7 @@ const OrderEditModal = ({ isOpen, onClose, order, onSubmit, isLoading }) => {
 
         <form
           onSubmit={handleSubmit}
-          className="p-4 sm:p-6 space-y-6 overflow-y-auto max-h-[calc(92vh-80px)]"
+          className="p-4 sm:p-6 space-y-5 overflow-y-auto flex-1 min-h-0"
         >
 
           {!isEditable && order?.status && (
@@ -181,6 +214,25 @@ const OrderEditModal = ({ isOpen, onClose, order, onSubmit, isLoading }) => {
                     onChange={(e) => setFormData({ ...formData, delivery_address: e.target.value })}
                     className="input input-bordered w-full rounded-2xl bg-gray-50 focus:bg-white focus:border-orange-500 focus:ring-2 focus:ring-orange-100 focus:outline-none transition"
                     placeholder="Contoh: Kantor BKPSDM"
+                    disabled={!isEditable}
+                  />
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
+                <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60 flex items-center gap-2">
+                  <FiMapPin className="text-orange-600" size={16} />
+                  <h4 className="text-sm font-bold text-gray-800">Koordinat Titik Alamat Antar</h4>
+                </div>
+                <div className="p-4">
+                  <p className="text-xs text-gray-500 mb-3">
+                    Cari alamat atau nama tempat, lalu pilih dari hasil. Atau klik di peta untuk set titik. Koordinat akan dikirim ke kurir via WhatsApp untuk panduan lokasi antar.
+                  </p>
+                  <OrderLocationMap
+                    latitude={formData.latitude}
+                    longitude={formData.longitude}
+                    initialAddress={formData.delivery_address}
+                    onLocationChange={(lat, lng) => setFormData((prev) => ({ ...prev, latitude: lat, longitude: lng }))}
                     disabled={!isEditable}
                   />
                 </div>
@@ -255,21 +307,45 @@ const OrderEditModal = ({ isOpen, onClose, order, onSubmit, isLoading }) => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div className="form-control">
-                  <label className="label text-xs font-bold text-gray-500 uppercase">
-                    Catatan Order
-                  </label>
-                  <textarea
-                    rows={4}
-                    value={formData.notesText}
-                    onChange={(e) => setFormData({ ...formData, notesText: e.target.value })}
-                    className="textarea textarea-bordered w-full rounded-2xl bg-gray-50 focus:bg-white focus:border-orange-500 focus:ring-2 focus:ring-orange-100 focus:outline-none"
-                    placeholder="Satu catatan per baris"
-                    disabled={!isEditable}
-                  />
+              <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50/60">
+                  <h4 className="text-sm font-bold text-gray-800">Catatan Order</h4>
+                  <span className="text-xs text-gray-500">Satu catatan per baris</span>
                 </div>
-                <div className="form-control">
+                <div className="p-4 space-y-2">
+                  {formData.notesList.map((note, idx) => (
+                    <div key={idx} className="flex gap-2 items-center">
+                      <input
+                        type="text"
+                        value={note}
+                        onChange={(e) => updateNote(idx, e.target.value)}
+                        className="input input-bordered flex-1 rounded-xl bg-gray-50 focus:bg-white focus:border-orange-500 focus:ring-2 focus:ring-orange-100 focus:outline-none text-sm"
+                        placeholder={`Catatan ${idx + 1}`}
+                        disabled={!isEditable}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeNoteRow(idx)}
+                        className="btn btn-ghost btn-square text-red-400 hover:text-red-600 shrink-0"
+                        disabled={!isEditable || formData.notesList.length <= 1}
+                      >
+                        <FiTrash2 size={16} />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={addNoteRow}
+                    className="btn btn-xs bg-orange-50 text-orange-600 hover:bg-orange-100 border-none rounded-lg"
+                    disabled={!isEditable}
+                  >
+                    <FiPlus className="mr-1" /> Tambah baris catatan
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="form-control lg:col-span-2">
                   <label className="label text-xs font-bold text-gray-500 uppercase">
                     Assign Kurir (IDLE)
                   </label>
@@ -300,18 +376,18 @@ const OrderEditModal = ({ isOpen, onClose, order, onSubmit, isLoading }) => {
                 </div>
               </div>
 
-          <div className="py-4 flex flex-col mx-auto sm:flex-row gap-3">
+          <div className="pt-4 pb-2 flex flex-col-reverse sm:flex-row gap-3 justify-end border-t border-gray-100">
             <button
               type="button"
               onClick={onClose}
-              className="btn flex-1 px-4 py-2 bg-gray-200 border-none text-gray-600 hover:bg-gray-200 rounded-xl"
+              className="btn flex-1 sm:flex-none px-5 py-2.5 bg-gray-100 border border-gray-200 text-gray-700 hover:bg-gray-200 rounded-xl font-medium"
             >
               Batal
             </button>
             <button
               type="submit"
               disabled={!isEditable || isLoading}
-              className="btn flex-1 bg-[#f14c06] px-4 py-2 hover:bg-[#d14306] border-none text-white rounded-xl"
+              className="btn flex-1 sm:flex-none bg-[#f14c06] px-5 py-2.5 hover:bg-[#d14306] border-none text-white rounded-xl font-medium shadow-md"
             >
               {isLoading ? "Menyimpan..." : "Simpan Perubahan"}
             </button>

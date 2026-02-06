@@ -8,7 +8,7 @@ const PageHeader = ({ title, description, btnLabel, onBtnClick }) => {
         {description && <p className="text-gray-500 text-sm mt-1">{description}</p>}
       </div>
 
-      {btnLabel && (
+      {btnLabel && onBtnClick && (
         <button
           onClick={onBtnClick}
           className="btn bg-[#f14c06] hover:bg-[#d14306] text-white border-none rounded-xl gap-2 shadow-lg shadow-orange-200/50 transition-transform transform hover:scale-105"

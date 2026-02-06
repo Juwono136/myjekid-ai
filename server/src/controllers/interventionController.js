@@ -93,8 +93,7 @@ export const toggleSessionMode = async (req, res, next) => {
     let updateData = { mode };
 
     if (mode === "HUMAN") {
-      const pauseDuration = 30 * 60 * 1000; // 30 Menit
-      updateData.is_paused_until = new Date(Date.now() + pauseDuration);
+      updateData.is_paused_until = null; // Tanpa batasan waktu; hanya admin yang mengembalikan ke BOT
     } else {
       updateData.is_paused_until = null;
     }

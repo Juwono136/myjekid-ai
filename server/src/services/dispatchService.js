@@ -2,6 +2,28 @@ import { Op } from "sequelize";
 import { Courier, Order, User } from "../models/index.js";
 import { messageService } from "./messageService.js";
 import { redisClient } from "../config/redisClient.js";
+import { aiService } from "./ai/AIService.js";
+
+async function notifyCustomerNoCourier(order) {
+  const customerPhone = order.user_phone || order.user?.phone;
+  if (!customerPhone) return;
+  try {
+    const userName = order.user?.name || "Customer";
+    const reply = await aiService.generateReply({
+      role: "CUSTOMER",
+      status: "NO_COURIER_AVAILABLE",
+      context: {
+        role: "CUSTOMER",
+        user_name: userName,
+        last_message: "",
+      },
+    });
+    const text = typeof reply === "string" ? reply : reply?.reply;
+    if (text) await messageService.sendMessage(customerPhone, text);
+  } catch (err) {
+    console.error("Failed to send NO_COURIER_AVAILABLE to customer:", err);
+  }
+}
 
 export const dispatchService = {
   async offerPendingOrdersToCourier(courier, limit = 3) {
@@ -51,6 +73,7 @@ export const dispatchService = {
 
       if (!fallbackCouriers.length) {
         console.log("TIDAK ADA KURIR ONLINE.");
+        await notifyCustomerNoCourier(order);
         return;
       }
 
@@ -70,6 +93,7 @@ export const dispatchService = {
 
     if (!candidate) {
       console.log(`Ada ${onlineCourierIds.length} Kurir Online, tapi SEMUA SIBUK.`);
+      await notifyCustomerNoCourier(order);
       return;
     }
 
@@ -97,7 +121,7 @@ export const dispatchService = {
 
       const message =
         `🔔 *ORDER BARU MASUK!* 🔔\n\n` +
-        `🆔 *Order ID:* ${displayId}\n\n` +
+        `🆔 *Order ID:* ${order.order_id}\n\n` +
         `📦 *Item:*\n${itemsList}\n\n` +
         `📍 *Ambil:* ${order.pickup_address}\n` +
         `🏁 *Antar:* ${order.delivery_address} (*Link Maps:* ${mapsLink}\n\n` +

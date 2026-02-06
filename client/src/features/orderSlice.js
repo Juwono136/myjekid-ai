@@ -9,6 +9,9 @@ const initialState = {
   isLoading: false,
   isError: false,
   message: "",
+  customers: [],
+  isCustomersLoading: false,
+  isCreateByAdminLoading: false,
 };
 
 // Fetch List Orders
@@ -40,6 +43,32 @@ export const updateOrderDetail = createAsyncThunk(
   async ({ orderId, payload }, thunkAPI) => {
     try {
       return await orderService.updateOrder(orderId, payload);
+    } catch (error) {
+      const msg = error.response?.data?.message || error.message;
+      return thunkAPI.rejectWithValue(msg);
+    }
+  }
+);
+
+// Fetch customers (untuk dropdown Tambah Order by Admin)
+export const fetchCustomers = createAsyncThunk(
+  "orders/fetchCustomers",
+  async (_, thunkAPI) => {
+    try {
+      return await orderService.getCustomers();
+    } catch (error) {
+      const msg = error.response?.data?.message || error.message;
+      return thunkAPI.rejectWithValue(msg);
+    }
+  }
+);
+
+// Create order by admin
+export const createOrderByAdmin = createAsyncThunk(
+  "orders/createByAdmin",
+  async (payload, thunkAPI) => {
+    try {
+      return await orderService.createOrderByAdmin(payload);
     } catch (error) {
       const msg = error.response?.data?.message || error.message;
       return thunkAPI.rejectWithValue(msg);
@@ -99,6 +128,33 @@ const orderSlice = createSlice({
       })
       .addCase(updateOrderDetail.rejected, (state, action) => {
         state.isDetailLoading = false;
+        state.isError = true;
+        state.message = action.payload;
+      });
+
+    builder
+      .addCase(fetchCustomers.pending, (state) => {
+        state.isCustomersLoading = true;
+      })
+      .addCase(fetchCustomers.fulfilled, (state, action) => {
+        state.isCustomersLoading = false;
+        state.customers = action.payload?.data || [];
+      })
+      .addCase(fetchCustomers.rejected, (state) => {
+        state.isCustomersLoading = false;
+        state.customers = [];
+      });
+
+    builder
+      .addCase(createOrderByAdmin.pending, (state) => {
+        state.isCreateByAdminLoading = true;
+        state.isError = false;
+      })
+      .addCase(createOrderByAdmin.fulfilled, (state) => {
+        state.isCreateByAdminLoading = false;
+      })
+      .addCase(createOrderByAdmin.rejected, (state, action) => {
+        state.isCreateByAdminLoading = false;
         state.isError = true;
         state.message = action.payload;
       });
