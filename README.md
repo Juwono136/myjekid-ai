@@ -308,17 +308,23 @@ Untuk pertanyaan atau dukungan, buka issue di repository di atas.
 ### Halaman Mitra Kurir
 <img width="1920" height="869" alt="image" src="https://github.com/user-attachments/assets/3674c8cd-cd0f-4c8d-8acd-7f4e31e3939f" />
 
+<img width="1912" height="868" alt="image" src="https://github.com/user-attachments/assets/14659d96-0aaf-4dcb-8087-3fb278cb3188" />
+
 ### Halaman Live Map Kurir
 <img width="1920" height="889" alt="image" src="https://github.com/user-attachments/assets/eb37afa8-d492-4759-b53c-5f9d3bd07a2e" />
 
 ### Halaman Order Monitor
 <img width="1920" height="1282" alt="image" src="https://github.com/user-attachments/assets/03258445-7bf7-4376-ba63-8d623c2fb626" />
 
+<img width="1915" height="863" alt="image" src="https://github.com/user-attachments/assets/387f4811-73dc-42ec-8e2e-46e345c3e9f2" />
+
 ### Halaman Intervention Mode
 <img width="1920" height="869" alt="image" src="https://github.com/user-attachments/assets/f8109a44-c6d3-44c8-a514-ac08e1e13edc" />
 
 ### Halaman User Management
 <img width="1920" height="869" alt="image" src="https://github.com/user-attachments/assets/0f1a0d9e-721f-4f3e-9d40-3f1666f0592c" />
+
+<img width="1913" height="866" alt="image" src="https://github.com/user-attachments/assets/ae16209b-9bf5-4da9-ac62-2fc9a843ecdf" />
 
 ### Halaman Laporan Transaksi
 <img width="1920" height="2254" alt="image" src="https://github.com/user-attachments/assets/da6c7939-1938-42e3-9293-78da077a39c6" />
