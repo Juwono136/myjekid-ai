@@ -5,7 +5,7 @@
 ![Docker](https://img.shields.io/badge/Docker-Enabled-blue)
 ![Lisensi](https://img.shields.io/badge/Lisensi-Private-red)
 
-**MyJekID** adalah sistem aplikasi untuk manajemen layanan kurir dan jasa pesan-antar yang beroperasi di wilayah **Pulau Sumbawa, Nusa Tenggara Barat**. Aplikasi ini menyediakan **Admin Dashboard** untuk pemantauan real-time, manajemen kurir, monitoring order, serta **AI Chatbot** (didukung Gemini/OpenAI/Ollama/LM Studio) yang menangani pelanggan dan kurir via **WhatsApp** secara otomatis.
+**MyJekID** adalah sistem aplikasi untuk manajemen layanan kurir dan jasa pesan-antar yang beroperasi di wilayah **Pulau Sumbawa, Nusa Tenggara Barat**. Aplikasi ini menyediakan **Admin Dashboard** untuk pemantauan real-time, manajemen kurir, monitoring order, serta **AI Chatbot** (Gemini/OpenAI/Ollama/LM Studio) yang menangani pelanggan dan kurir via **WhatsApp** secara otomatis.
 
 ---
 
@@ -22,6 +22,7 @@
 - [Role & Akses](#role--akses)
 - [Integrasi Eksternal](#integrasi-eksternal)
 - [Lisensi & Kontak](#lisensi--kontak)
+- [Overview Web App](#overview-web-app)
 
 ---
 
@@ -31,18 +32,18 @@
 - Layanan pelanggan dan kurir otomatis via **WhatsApp** (melalui WAHA).
 - Dukungan multi-provider AI: **Gemini**, **OpenAI**, **Ollama**, **LM Studio**.
 - Integrasi dengan **n8n** untuk alur otomatisasi (workflow).
-- Mode intervensi: admin dapat mengambil alih chat dari bot dan mengobrol langsung dengan pengguna.
+- Mode intervensi: admin dapat mengambil alih chat dari bot dan mengobrol langsung dengan pengguna/customer.
 
 ### Admin Dashboard (Web App)
 - **Dashboard Overview** — Monitoring order, distribusi order, transaksi, dan quick access ke:
   - n8n workflow  
   - WAHA Dashboard  
   - Storage (MinIO)  
-  - Chatbot  
+  - Chatbot via Whatsapp
 - **Manajemen Order** — Daftar order, detail, edit status, buat order oleh admin, bukti pengiriman, timeline, peta rute.
 - **Mitra Kurir** — CRUD kurir (tambah, update, hapus).
 - **Live Map** — Peta real-time untuk melacak lokasi kurir.
-- **Intervention / Chat** — Daftar sesi chat aktif, riwayat percakapan, kirim pesan sebagai admin, toggle mode bot/manual.
+- **Intervention / Chat Mode** — Daftar sesi chat aktif, riwayat percakapan, kirim pesan sebagai admin, toggle mode bot/manual.
 - **Laporan** — Ringkasan transaksi, grafik revenue, export Excel.
 - **Manajemen User** — CRUD admin (hanya SUPER_ADMIN).
 - **Pengaturan** — Profil dan ubah password.
@@ -206,7 +207,7 @@ Variabel berikut digunakan backend (dan bisa diset di `server/.env` atau environ
 
 ### Base URL API
 - Development: `http://localhost:5000/api`  
-- (Production: sesuaikan dengan domain backend)
+- Production: `https://myjek.mmsdashboard.dev`
 
 ### Autentikasi
 - **POST** `/api/auth/login` — Login (body: `email`, `password`). Mengembalikan token JWT.
@@ -296,3 +297,36 @@ Route yang memakai `restrictTo` hanya bisa diakses oleh role yang disebutkan.
 - **Issues:** [GitHub Issues](https://github.com/Juwono136/myjekid-ai/issues)
 
 Untuk pertanyaan atau dukungan, buka issue di repository di atas.
+
+## Overview Web App
+### Login Page
+<img width="1920" height="869" alt="image" src="https://github.com/user-attachments/assets/8d726084-ca35-4666-8988-1361c767627d" />
+
+### Halaman Dashboard Utama
+<img width="1920" height="1658" alt="image" src="https://github.com/user-attachments/assets/bb2b80c9-2fc1-4232-b8e5-5f90a2a494eb" />
+
+### Halaman Mitra Kurir
+<img width="1920" height="869" alt="image" src="https://github.com/user-attachments/assets/3674c8cd-cd0f-4c8d-8acd-7f4e31e3939f" />
+
+### Halaman Live Map Kurir
+<img width="1920" height="889" alt="image" src="https://github.com/user-attachments/assets/eb37afa8-d492-4759-b53c-5f9d3bd07a2e" />
+
+### Halaman Order Monitor
+<img width="1920" height="1282" alt="image" src="https://github.com/user-attachments/assets/03258445-7bf7-4376-ba63-8d623c2fb626" />
+
+### Halaman Intervention Mode
+<img width="1920" height="869" alt="image" src="https://github.com/user-attachments/assets/f8109a44-c6d3-44c8-a514-ac08e1e13edc" />
+
+### Halaman User Management
+<img width="1920" height="869" alt="image" src="https://github.com/user-attachments/assets/0f1a0d9e-721f-4f3e-9d40-3f1666f0592c" />
+
+### Halaman Laporan Transaksi
+<img width="1920" height="2254" alt="image" src="https://github.com/user-attachments/assets/da6c7939-1938-42e3-9293-78da077a39c6" />
+
+### Halaman Pengaturan
+<img width="1920" height="1009" alt="image" src="https://github.com/user-attachments/assets/6a271bc2-7b28-4e45-b5ae-f11bff7cb543" />
+
+<img width="1920" height="1009" alt="image" src="https://github.com/user-attachments/assets/870ecec7-4dec-4982-91b4-5aecc118a3c5" />
+
+
+
