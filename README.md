@@ -126,7 +126,7 @@ Script `postinstall` akan menginstall dependensi di `client/` dan `server/`.
 
 ### 2. Environment (Backend)
 
-Buat file `server/.env` (lihat [Variabel Lingkungan](#variabel-lingkungan)). Minimal yang wajib:
+Buat file `server/.env` (lihat [Variabel Lingkungan/File .env](#variabel-lingkungan)). Minimal yang wajib:
 
 - `PORT`, `NODE_ENV`, `FRONTEND_URL`, `JWT_SECRET`
 - `DATABASE_URL` (PostgreSQL)
@@ -292,7 +292,7 @@ Route yang memakai `restrictTo` hanya bisa diakses oleh role yang disebutkan.
 
 ## Lisensi & Kontak
 
-- **Lisensi:** Private.  
+- **Lisensi:** Private.
 - **Repository:** [myjekid-ai](https://github.com/Juwono136/myjekid-ai)  
 - **Issues:** [GitHub Issues](https://github.com/Juwono136/myjekid-ai/issues)
 
