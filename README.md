@@ -7,6 +7,8 @@
 
 **MyJekID** adalah sistem aplikasi untuk manajemen layanan kurir dan jasa pesan-antar yang beroperasi di wilayah **Pulau Sumbawa, Nusa Tenggara Barat**. Aplikasi ini menyediakan **Admin Dashboard** untuk pemantauan real-time, manajemen kurir, monitoring order, serta **AI Chatbot** (Gemini/OpenAI/Ollama/LM Studio) yang menangani pelanggan dan kurir via **WhatsApp** secara otomatis.
 
+- **Web App Link**: http://myjek.mmsdashboard.dev/
+
 ---
 
 ## Daftar Isi
