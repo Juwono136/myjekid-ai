@@ -171,8 +171,8 @@ const splitAddressAndTitipNote = (text) => {
   const t = (text || "").trim();
   if (!t || t.length < 10) return null;
   const lower = t.toLowerCase();
-  const hasAddressHint = /antar\s+ke\s+|ke\s+ruang\s+|kantor\s+|gedung\s+|lantai\s+|alamat\s+antar/i.test(t);
-  const hasTitipHint = /\bbilang\s+aja\s+|\btitipan\s+|\btitip\s+ke\s+|\bserah\s+ke\s+/i.test(t);
+  const hasAddressHint = /antar\s+ke\s+|ke\s+ruang\s+|ruang\s+pak\s+|ruang\s+bu\s+|kantor\s+|gedung\s+|lantai\s+|alamat\s+antar/i.test(t);
+  const hasTitipHint = /\bbilang\s+aja\s+|\btitipan\s+|\btitip\s+(aja\s+)?ke\s+|\bserah\s+ke\s+|\btitip\s+aja\s+/i.test(t);
   if (!hasAddressHint || !hasTitipHint) return null;
 
   let addressPart = "";
@@ -691,50 +691,69 @@ export const handleUserMessage = async (
     };
   }
 
-  // HANDLER KHUSUS LOKASI (UPDATE KOORDINAT)
+  // HANDLER KHUSUS LOKASI (UPDATE KOORDINAT) — step 1: lokasi antar (delivery), step 2: lokasi pickup. Pesan WAJIB sesuai jenis lokasi yang baru diterima.
   if (locationData && locationData.latitude) {
     console.log(
       `User ${name} Shared Location: ${locationData.latitude}, ${locationData.longitude}`,
     );
 
-    await user.update({
-      latitude: locationData.latitude,
-      longitude: locationData.longitude,
-    });
-
-    sessionDraft.has_coordinate = true;
-    sessionDraft.coordinate = {
-      lat: locationData.latitude,
-      long: locationData.longitude,
-    };
-    const draftOrderLoc = await Order.findOne({
-      where: { user_phone: realPhone, status: { [Op.in]: ["DRAFT", "PENDING_CONFIRMATION"] } },
-      order: [["created_at", "DESC"]],
-    });
-    const activeOrderLoc = await Order.findOne({
-      where: {
-        user_phone: realPhone,
-        status: { [Op.in]: ["LOOKING_FOR_DRIVER", "ON_PROCESS", "BILL_VALIDATION", "BILL_SENT"] },
-      },
-      order: [["created_at", "DESC"]],
-    });
+    const [draftOrderLoc, activeOrderLocPlaceholder] = await Promise.all([
+      Order.findOne({
+        where: { user_phone: realPhone, status: { [Op.in]: ["DRAFT", "PENDING_CONFIRMATION"] } },
+        order: [["created_at", "DESC"]],
+      }),
+      Order.findOne({
+        where: {
+          user_phone: realPhone,
+          status: { [Op.in]: ["LOOKING_FOR_DRIVER", "ON_PROCESS", "BILL_VALIDATION", "BILL_SENT"] },
+        },
+        order: [["created_at", "DESC"]],
+      }),
+    ]);
+    let activeOrderLoc = activeOrderLocPlaceholder;
     const hasItemsLoc = Array.isArray(draftOrderLoc?.items_summary) && draftOrderLoc.items_summary.length > 0;
     const hasPickupLoc = draftOrderLoc?.pickup_address?.length > 2;
     const hasAddressLoc = draftOrderLoc?.delivery_address?.length > 3;
-    const needsOkConfirm = draftOrderLoc && hasItemsLoc && hasPickupLoc && hasAddressLoc;
-    sessionDraft.location_confirmed = !needsOkConfirm;
-    sessionDraft.pending_location_confirmation = needsOkConfirm;
-    await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
 
-    const replyStatus =
-      needsOkConfirm ? "LOCATION_RECEIVED_CONFIRM" : "LOCATION_RECEIVED";
-
-    if (draftOrderLoc && hasItemsLoc && hasPickupLoc && hasAddressLoc) {
-      if (draftOrderLoc.status !== "PENDING_CONFIRMATION") {
-        await draftOrderLoc.update({ status: "PENDING_CONFIRMATION" });
-      }
+    // Lokasi PERTAMA = lokasi antar (tujuan pengantaran). Hanya masuk sini bila belum punya has_coordinate.
+    if (!sessionDraft.has_coordinate) {
+      await user.update({
+        latitude: locationData.latitude,
+        longitude: locationData.longitude,
+      });
+      sessionDraft.has_coordinate = true;
+      sessionDraft.coordinate = {
+        lat: locationData.latitude,
+        long: locationData.longitude,
+      };
+      sessionDraft.location_confirmed = false;
+      sessionDraft.pending_location_confirmation = !!(draftOrderLoc && hasItemsLoc && hasPickupLoc && hasAddressLoc);
+      await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
+      const needPickupMsg =
+        "Terima kasih, lokasi *alamat antar* (tujuan pengantaran) sudah kami catat ya kak 😊\n\nSekarang kirim juga *titik lokasi alamat pickup* (tempat ambil pesanan) ya — klik Clip (📎) di WA -> Pilih Location -> Send Your Current Location.";
+      return { reply: needPickupMsg };
     }
 
+    // Lokasi KEDUA = lokasi pickup (tempat ambil pesanan). Jangan ucapkan "alamat antar" di sini.
+    if (!sessionDraft.has_pickup_coordinate) {
+      sessionDraft.has_pickup_coordinate = true;
+      sessionDraft.pickup_coordinate = {
+        lat: locationData.latitude,
+        long: locationData.longitude,
+      };
+      sessionDraft.pickup_location_confirmed = false;
+      sessionDraft.pending_pickup_location_confirmation = !!(draftOrderLoc && hasItemsLoc && hasPickupLoc && hasAddressLoc);
+      await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
+      const pickupReceivedMsg =
+        "Lokasi *pickup* (tempat ambil pesanan) sudah kami catat ya kak 😊\n\nBalas *OK* atau *Ya* untuk konfirmasi terakhir, nanti pesanan kami proses dan carikan kurir.";
+      return { reply: pickupReceivedMsg };
+    }
+
+    sessionDraft.location_confirmed = !(draftOrderLoc && hasItemsLoc && hasPickupLoc && hasAddressLoc);
+    sessionDraft.pending_location_confirmation = !!(draftOrderLoc && hasItemsLoc && hasPickupLoc && hasAddressLoc);
+    await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
+    const replyStatus =
+      sessionDraft.pending_location_confirmation ? "LOCATION_RECEIVED_CONFIRM" : "LOCATION_RECEIVED";
     return {
       reply: await makeReply(
         replyStatus,
@@ -753,36 +772,60 @@ export const handleUserMessage = async (
     };
   }
 
-  // HANDLE GOOGLE MAPS LINK (TEXT)
+  // HANDLE GOOGLE MAPS LINK (TEXT) — urutan sama dengan lokasi attachment: link pertama = alamat antar, link kedua = alamat pickup
   const mapLinkLocation = parseGoogleMapsLink(cleanText);
   const mapOnly = cleanText.replace(/https?:\/\/\S+/gi, "").trim().length === 0;
   if (mapLinkLocation && mapOnly && !locationData) {
-    await user.update({
-      latitude: mapLinkLocation.latitude,
-      longitude: mapLinkLocation.longitude,
-    });
-
-    sessionDraft.has_coordinate = true;
-    sessionDraft.coordinate = {
-      lat: mapLinkLocation.latitude,
-      long: mapLinkLocation.longitude,
-    };
-
-    const draftOrderMap = await Order.findOne({
-      where: { user_phone: realPhone, status: { [Op.in]: ["DRAFT", "PENDING_CONFIRMATION"] } },
-      order: [["created_at", "DESC"]],
-    });
-    const activeOrderMap = await Order.findOne({
-      where: {
-        user_phone: realPhone,
-        status: { [Op.in]: ["LOOKING_FOR_DRIVER", "ON_PROCESS", "BILL_VALIDATION", "BILL_SENT"] },
-      },
-      order: [["created_at", "DESC"]],
-    });
+    const [draftOrderMap, activeOrderMap] = await Promise.all([
+      Order.findOne({
+        where: { user_phone: realPhone, status: { [Op.in]: ["DRAFT", "PENDING_CONFIRMATION"] } },
+        order: [["created_at", "DESC"]],
+      }),
+      Order.findOne({
+        where: {
+          user_phone: realPhone,
+          status: { [Op.in]: ["LOOKING_FOR_DRIVER", "ON_PROCESS", "BILL_VALIDATION", "BILL_SENT"] },
+        },
+        order: [["created_at", "DESC"]],
+      }),
+    ]);
     const hasItemsMap = Array.isArray(draftOrderMap?.items_summary) && draftOrderMap.items_summary.length > 0;
     const hasPickupMap = draftOrderMap?.pickup_address?.length > 2;
     const hasAddressMap = draftOrderMap?.delivery_address?.length > 3;
     const needsOkConfirmMap = draftOrderMap && hasItemsMap && hasPickupMap && hasAddressMap;
+
+    if (sessionDraft.has_coordinate && !sessionDraft.has_pickup_coordinate) {
+      sessionDraft.has_pickup_coordinate = true;
+      sessionDraft.pickup_coordinate = {
+        lat: mapLinkLocation.latitude,
+        long: mapLinkLocation.longitude,
+      };
+      sessionDraft.pickup_location_confirmed = false;
+      sessionDraft.pending_pickup_location_confirmation = needsOkConfirmMap;
+      await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
+      const pickupReceivedMsg =
+        "Lokasi *pickup* (tempat ambil pesanan) sudah kami catat ya kak 😊\n\nBalas *OK* atau *Ya* untuk konfirmasi terakhir, nanti pesanan kami proses dan carikan kurir.";
+      return { reply: pickupReceivedMsg };
+    }
+
+    if (!sessionDraft.has_coordinate) {
+      await user.update({
+        latitude: mapLinkLocation.latitude,
+        longitude: mapLinkLocation.longitude,
+      });
+      sessionDraft.has_coordinate = true;
+      sessionDraft.coordinate = {
+        lat: mapLinkLocation.latitude,
+        long: mapLinkLocation.longitude,
+      };
+      sessionDraft.location_confirmed = false;
+      sessionDraft.pending_location_confirmation = needsOkConfirmMap;
+      await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
+      const needPickupMsg =
+        "Terima kasih, lokasi *alamat antar* (tujuan pengantaran) sudah kami catat ya kak 😊\n\nSekarang kirim juga *titik lokasi alamat pickup* (tempat ambil pesanan) ya — klik Clip (📎) di WA -> Pilih Location -> Send Your Current Location.";
+      return { reply: needPickupMsg };
+    }
+
     sessionDraft.location_confirmed = !needsOkConfirmMap;
     sessionDraft.pending_location_confirmation = needsOkConfirmMap;
     await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
@@ -812,23 +855,25 @@ export const handleUserMessage = async (
   }
 
   try {
-    // CONTEXT GATHERING
-    const draftOrder = await Order.findOne({
-      where: { user_phone: realPhone, status: { [Op.in]: ["DRAFT", "PENDING_CONFIRMATION"] } },
-      order: [["created_at", "DESC"]],
-    });
-    const activeOrder = await Order.findOne({
-      where: {
-        user_phone: realPhone,
-        status: { [Op.in]: ["LOOKING_FOR_DRIVER", "ON_PROCESS", "BILL_VALIDATION", "BILL_SENT"] },
-      },
-      include: [{ model: Courier, as: "courier" }],
-      order: [["created_at", "DESC"]],
-    });
-    const lastSuccessOrder = await Order.findOne({
-      where: { user_phone: realPhone, status: "COMPLETED" },
-      order: [["created_at", "DESC"]],
-    });
+    // CONTEXT GATHERING — paralel agar respon lebih cepat
+    const [draftOrder, activeOrder, lastSuccessOrder] = await Promise.all([
+      Order.findOne({
+        where: { user_phone: realPhone, status: { [Op.in]: ["DRAFT", "PENDING_CONFIRMATION"] } },
+        order: [["created_at", "DESC"]],
+      }),
+      Order.findOne({
+        where: {
+          user_phone: realPhone,
+          status: { [Op.in]: ["LOOKING_FOR_DRIVER", "ON_PROCESS", "BILL_VALIDATION", "BILL_SENT"] },
+        },
+        include: [{ model: Courier, as: "courier" }],
+        order: [["created_at", "DESC"]],
+      }),
+      Order.findOne({
+        where: { user_phone: realPhone, status: "COMPLETED" },
+        order: [["created_at", "DESC"]],
+      }),
+    ]);
 
     const currentStatus = draftOrder
       ? draftOrder.status
@@ -836,12 +881,21 @@ export const handleUserMessage = async (
       ? activeOrder.status
       : "NONE";
 
-    // EARLY: Saat menunggu konfirmasi lokasi (Balas OK/Ya), jika user ketik ok/ya — proses order langsung tanpa bergantung intent AI
+    /** Update order berjalan = order sudah ON_PROCESS atau BILL_VALIDATION (bukan buat order baru). */
+    const isUpdateOrderBerjalan =
+      activeOrder && ["ON_PROCESS", "BILL_VALIDATION"].includes(activeOrder.status);
+
+    // EARLY: Konfirmasi lokasi pickup (Balas OK/Ya setelah kirim lokasi pickup) — baru proses order & carikan kurir
     if (
-      sessionDraft.pending_location_confirmation &&
+      sessionDraft.pending_pickup_location_confirmation &&
       isConfirmingText(lowerText) &&
-      draftOrder
+      draftOrder &&
+      sessionDraft.has_pickup_coordinate &&
+      sessionDraft.pickup_coordinate?.lat != null &&
+      sessionDraft.pickup_coordinate?.long != null
     ) {
+      sessionDraft.pickup_location_confirmed = true;
+      sessionDraft.pending_pickup_location_confirmation = false;
       sessionDraft.location_confirmed = true;
       sessionDraft.pending_location_confirmation = false;
       await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
@@ -857,7 +911,11 @@ export const handleUserMessage = async (
         (sessionDraft.coordinate && sessionDraft.coordinate.lat != null);
 
       if (validItems && validPickup && validAddress && hasLocation) {
-        await draftOrder.update({ status: "LOOKING_FOR_DRIVER" });
+        await draftOrder.update({
+          status: "LOOKING_FOR_DRIVER",
+          pickup_latitude: sessionDraft.pickup_coordinate.lat,
+          pickup_longitude: sessionDraft.pickup_coordinate.long,
+        });
         await user.update({
           address_text: draftOrder.delivery_address,
           last_order_date: new Date(),
@@ -880,6 +938,74 @@ export const handleUserMessage = async (
               lastMessage: cleanText,
             }),
           ),
+        };
+      }
+    }
+
+    // EARLY: Saat menunggu konfirmasi lokasi antar (Balas OK/Ya) — jika belum ada lokasi pickup, minta dulu
+    if (
+      sessionDraft.pending_location_confirmation &&
+      isConfirmingText(lowerText) &&
+      draftOrder
+    ) {
+      sessionDraft.location_confirmed = true;
+      sessionDraft.pending_location_confirmation = false;
+      await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
+
+      const validItems =
+        Array.isArray(draftOrder.items_summary) && draftOrder.items_summary.length > 0;
+      const validPickup = draftOrder.pickup_address?.length > 2;
+      const validAddress = draftOrder.delivery_address?.length > 3;
+      const hasLocation =
+        user.latitude != null ||
+        user.longitude != null ||
+        sessionDraft.has_coordinate === true ||
+        (sessionDraft.coordinate && sessionDraft.coordinate.lat != null);
+      const hasPickupCoord =
+        sessionDraft.has_pickup_coordinate &&
+        sessionDraft.pickup_coordinate?.lat != null &&
+        sessionDraft.pickup_coordinate?.long != null;
+
+      if (validItems && validPickup && validAddress && hasLocation && hasPickupCoord) {
+        await draftOrder.update({
+          status: "LOOKING_FOR_DRIVER",
+          pickup_latitude: sessionDraft.pickup_coordinate.lat,
+          pickup_longitude: sessionDraft.pickup_coordinate.long,
+        });
+        await user.update({
+          address_text: draftOrder.delivery_address,
+          last_order_date: new Date(),
+        });
+        await redisClient.del(redisKey);
+        dispatchService
+          .findDriverForOrder(draftOrder.order_id)
+          .catch((err) => console.error("❌ Dispatch Error:", err));
+        return {
+          reply: await makeReply(
+            "ORDER_CONFIRMED",
+            buildUserContext({
+              user,
+              draftOrder,
+              items: draftOrder.items_summary || [],
+              pickup: draftOrder.pickup_address || "",
+              address: draftOrder.delivery_address || "",
+              notes: uniqueNotesList(draftOrder.order_notes || []),
+              flags: { searching_driver: true },
+              lastMessage: cleanText,
+            }),
+          ),
+        };
+      }
+
+      if (validItems && validPickup && validAddress && hasLocation && !hasPickupCoord) {
+        sessionDraft.has_coordinate = true;
+        if (user.latitude != null && user.longitude != null) {
+          sessionDraft.coordinate = { lat: user.latitude, long: user.longitude };
+        }
+        await redisClient.set(redisKey, JSON.stringify(sessionDraft), { EX: 3600 });
+        return {
+          reply:
+            "Lokasi antar sudah kami catat. Sekarang kirim juga *titik lokasi alamat pickup* (tempat ambil pesanan) ya kak — klik Clip (📎) -> Location -> Send Your Current Location.",
         };
       }
 
@@ -968,16 +1094,17 @@ export const handleUserMessage = async (
     if (looksLikeStatusQuestion && !looksLikeOrderNoteInstruction) {
       intent = "CHECK_STATUS";
     }
+    // Hanya anggap sebagai UPDATE_ORDER (update order berjalan) bila order memang ON_PROCESS/BILL_VALIDATION
     if (
       looksLikeOrderNoteInstruction &&
       extractOrderNote(cleanText) &&
-      (activeOrder || draftOrder || sessionDraft.pending_order_update)
+      isUpdateOrderBerjalan
     ) {
       intent = "UPDATE_ORDER";
     }
-    // Pelanggan punya order berjalan + kirim item (detail tambahan): anggap sebagai update order, bukan order baru
+    // Pelanggan punya order berjalan (ON_PROCESS/BILL_VALIDATION) + kirim item: anggap update order, bukan order baru
     if (
-      activeOrder &&
+      isUpdateOrderBerjalan &&
       !draftOrder &&
       aiItems.length > 0 &&
       ["ORDER_COMPLETE", "ORDER_INCOMPLETE"].includes(intent)
@@ -994,6 +1121,25 @@ export const handleUserMessage = async (
         (Array.isArray(aiData.order_notes) && aiData.order_notes.length > 0))
     ) {
       intent = "ORDER_COMPLETE";
+    }
+
+    // Persist alamat antar + catatan titip ke draft order segera (dari addressTitipSplit/aiData), agar selalu tersimpan ke DB sebelum reply apa pun
+    const hasAddressOrNotesFromMessage =
+      deliveryCandidate || (Array.isArray(aiData.order_notes) && aiData.order_notes.length > 0);
+    if (
+      draftOrder &&
+      ["DRAFT", "PENDING_CONFIRMATION"].includes(draftOrder.status) &&
+      hasAddressOrNotesFromMessage
+    ) {
+      if (deliveryCandidate) {
+        await draftOrder.update({
+          delivery_address: deliveryCandidate,
+          raw_message: cleanText,
+        });
+      }
+      if (Array.isArray(aiData.order_notes) && aiData.order_notes.length > 0) {
+        await appendOrderNotes(draftOrder, aiData.order_notes);
+      }
     }
 
     // PENDING LOCATION CONFIRMATION — jangan anggap pesan sebagai konfirmasi lokasi bila isinya update order (titip/serah)
@@ -1047,9 +1193,17 @@ export const handleUserMessage = async (
             user.latitude ||
             sessionDraft.has_coordinate ||
             (sessionDraft.coordinate && sessionDraft.coordinate.lat != null);
+          const hasPickupCoord =
+            sessionDraft.has_pickup_coordinate &&
+            sessionDraft.pickup_coordinate?.lat != null &&
+            sessionDraft.pickup_coordinate?.long != null;
 
-          if (validItems && validPickup && validAddress && hasLocation) {
-            await draftOrder.update({ status: "LOOKING_FOR_DRIVER" });
+          if (validItems && validPickup && validAddress && hasLocation && hasPickupCoord) {
+            await draftOrder.update({
+              status: "LOOKING_FOR_DRIVER",
+              pickup_latitude: sessionDraft.pickup_coordinate.lat,
+              pickup_longitude: sessionDraft.pickup_coordinate.long,
+            });
             await user.update({
               address_text: draftOrder.delivery_address,
               last_order_date: new Date(),
@@ -1224,7 +1378,22 @@ export const handleUserMessage = async (
         };
       }
 
-      await draftOrder.update({ status: "LOOKING_FOR_DRIVER" });
+      const hasPickupCoord =
+        sessionDraft.has_pickup_coordinate &&
+        sessionDraft.pickup_coordinate?.lat != null &&
+        sessionDraft.pickup_coordinate?.long != null;
+      if (!hasPickupCoord) {
+        return {
+          reply:
+            "Lokasi antar sudah kami catat. Sekarang kirim juga *titik lokasi alamat pickup* (tempat ambil pesanan) ya kak — klik Clip (📎) -> Location -> Send Your Current Location.",
+        };
+      }
+
+      await draftOrder.update({
+        status: "LOOKING_FOR_DRIVER",
+        pickup_latitude: sessionDraft.pickup_coordinate.lat,
+        pickup_longitude: sessionDraft.pickup_coordinate.long,
+      });
       await user.update({
         address_text: draftOrder.delivery_address,
         last_order_date: new Date(),
@@ -2020,8 +2189,8 @@ export const handleUserMessage = async (
           !addressUpdated &&
           !pickupUpdated &&
           !wantsRemoveNote;
-        const needsUpdateConfirmation =
-          !isDraftStatus || (isDraftStatus && notesOnlyUpdate);
+        // Draft + hanya catatan: simpan ke DB langsung (tanpa minta OK terpisah) agar order_notes terisi
+        const needsUpdateConfirmation = !(isDraftStatus && notesOnlyUpdate);
         const updateItemsPreview = (() => {
           if (wantsRemoveItem) {
             const removeNames = aiData.remove_items?.length
@@ -2068,6 +2237,64 @@ export const handleUserMessage = async (
           addressUpdated || pickupUpdated ? "address_updated" : null,
         ].filter(Boolean);
 
+        if (isDraftStatus && notesOnlyUpdate && updateNotes.length) {
+          await appendOrderNotes(targetOrder, updateNotes);
+          const afterNotes = [...(targetOrder.order_notes || []), ...updateNotes].filter(Boolean);
+          return {
+            reply: await makeReply(
+              "ORDER_SUMMARY",
+              buildUserContext({
+                user,
+                draftOrder: targetOrder,
+                activeOrder,
+                items: newItems,
+                pickup: targetOrder.pickup_address || "",
+                address: targetOrder.delivery_address || "",
+                notes: uniqueNotesList(afterNotes),
+                flags: { needs_confirmation: true, show_details: true },
+                lastMessage: cleanText,
+              }),
+            ),
+          };
+        }
+
+        // Buat order baru (draft): simpan langsung ke DB dan balas ringkasan order + langkah berikutnya (bukan skema "Update pesanan")
+        if (isDraftStatus && !isUpdateOrderBerjalan && needsUpdateConfirmation) {
+          await targetOrder.update({
+            items_summary: newItems,
+            pickup_address: targetOrder.pickup_address,
+            delivery_address: targetOrder.delivery_address,
+            raw_message: cleanText,
+          });
+          if (updateNotes.length) {
+            await appendOrderNotes(targetOrder, updateNotes);
+          }
+          const combinedDraftNotes = [
+            ...(targetOrder.order_notes || []),
+            ...updateNotes,
+          ].filter(Boolean);
+          return {
+            reply: await makeReply(
+              addressUpdated ? "ORDER_SUMMARY_ADDRESS_UPDATED" : "ORDER_SUMMARY",
+              buildUserContext({
+                user,
+                draftOrder: targetOrder,
+                activeOrder,
+                items: newItems,
+                pickup: targetOrder.pickup_address || "",
+                address: targetOrder.delivery_address || "",
+                notes: uniqueNotesList(combinedDraftNotes),
+                flags: {
+                  needs_confirmation: true,
+                  show_details: true,
+                  address_updated: addressUpdated,
+                },
+                lastMessage: cleanText,
+              }),
+            ),
+          };
+        }
+
         if (needsUpdateConfirmation) {
           sessionDraft.pending_order_update = {
             order_id: targetOrder.order_id,
@@ -2105,7 +2332,7 @@ export const handleUserMessage = async (
                 updateItems: updateItemsPreview,
                 updateNotes,
                 flags: {
-                  show_details: false,
+                  show_details: isDraftStatus,
                   needs_confirmation: true,
                   address_update_blocked: addressUpdateBlocked,
                   pickup_update_blocked: pickupUpdateBlocked,
@@ -2233,6 +2460,7 @@ export const handleUserMessage = async (
               notes: uniqueNotesList(draftOrder.order_notes || []),
               flags: {
                 needs_location: true,
+                show_details: true,
                 ...(hasSavedAddressFromPreviousOrder && { last_address: user.address_text }),
               },
               lastMessage: cleanText,
@@ -2268,6 +2496,7 @@ export const handleUserMessage = async (
             flags: {
               pending_location_confirmation: true,
               confirm_address_same: hasSavedAddressReturning,
+              show_details: true,
             },
             lastMessage: cleanText,
           }),
@@ -2282,7 +2511,22 @@ export const handleUserMessage = async (
         };
       }
 
-      await draftOrder.update({ status: "LOOKING_FOR_DRIVER" });
+      const hasPickupCoordLate =
+        sessionDraft.has_pickup_coordinate &&
+        sessionDraft.pickup_coordinate?.lat != null &&
+        sessionDraft.pickup_coordinate?.long != null;
+      if (!hasPickupCoordLate) {
+        return {
+          reply:
+            "Lokasi antar sudah kami catat. Sekarang kirim juga *titik lokasi alamat pickup* (tempat ambil pesanan) ya kak — klik Clip (📎) -> Location -> Send Your Current Location.",
+        };
+      }
+
+      await draftOrder.update({
+        status: "LOOKING_FOR_DRIVER",
+        pickup_latitude: sessionDraft.pickup_coordinate.lat,
+        pickup_longitude: sessionDraft.pickup_coordinate.long,
+      });
       await user.update({
         address_text: draftOrder.delivery_address,
         last_order_date: new Date(),
@@ -2395,7 +2639,7 @@ export const handleUserMessage = async (
                 pickup: inferredPickup,
                 address: finalAddress,
                 notes: uniqueNotesList(combinedDraftNotes),
-                flags: { needs_location: true },
+                flags: { needs_location: true, show_details: true },
                 lastMessage: cleanText,
               }),
               [LOCATION_INSTRUCTION],
@@ -2417,7 +2661,11 @@ export const handleUserMessage = async (
               pickup: inferredPickup,
               address: finalAddress,
               notes: uniqueNotesList(combinedDraftNotes),
-              flags: { needs_confirmation: true, address_updated: addressUpdated },
+              flags: {
+                needs_confirmation: true,
+                address_updated: addressUpdated,
+                show_details: true,
+              },
               lastMessage: cleanText,
             }),
           ),
@@ -2428,7 +2676,16 @@ export const handleUserMessage = async (
         return {
           reply: await makeReply(
             "ASK_ITEMS",
-            buildUserContext({ user, lastMessage: cleanText }),
+            buildUserContext({
+              user,
+              draftOrder: currentDraft,
+              items: mergedItems || [],
+              pickup: inferredPickup || "",
+              address: finalAddress || "",
+              notes: uniqueNotesList(combinedDraftNotes),
+              flags: { show_details: true },
+              lastMessage: cleanText,
+            }),
           ),
         };
       if (!hasPickup) {
@@ -2439,6 +2696,10 @@ export const handleUserMessage = async (
               user,
               draftOrder: currentDraft,
               items: mergedItems,
+              pickup: inferredPickup || "",
+              address: finalAddress || "",
+              notes: uniqueNotesList(combinedDraftNotes),
+              flags: { show_details: true },
               lastMessage: cleanText,
             }),
           ),
@@ -2454,6 +2715,7 @@ export const handleUserMessage = async (
             pickup: inferredPickup,
             address: finalAddress,
             notes: uniqueNotesList(combinedDraftNotes),
+            flags: { show_details: true },
             lastMessage: cleanText,
           }),
         ),

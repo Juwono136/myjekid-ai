@@ -172,6 +172,10 @@ const OrderMonitor = () => {
             toast.error(error || "Gagal memperbarui order.");
           }
         }}
+        onCancelSuccess={() => {
+          setEditModal({ isOpen: false, orderId: null });
+          fetchData();
+        }}
       />
 
       <OrderAddModal

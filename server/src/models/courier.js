@@ -58,7 +58,12 @@ const Courier = sequelize.define(
     timestamps: true,
     createdAt: "created_at",
     updatedAt: "updated_at",
-    indexes: [{ fields: ["status", "shift_code"] }, { fields: ["last_active_at"] }],
+    indexes: [
+      { fields: ["status", "shift_code"] },
+      { fields: ["last_active_at"] },
+      { fields: ["phone"] },
+      { fields: ["status", "is_active"] },
+    ],
   }
 );
 

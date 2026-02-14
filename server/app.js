@@ -15,6 +15,8 @@ import logger from "./src/utils/logger.js";
 
 import webhookRoutes from "./src/routes/webhookRoutes.js";
 import apiRoutes from "./src/routes/apiRoutes.js";
+import { startDispatchScheduler, stopDispatchScheduler } from "./src/services/dispatchScheduler.js";
+import { startAutoCancelScheduler, stopAutoCancelScheduler } from "./src/services/autoCancelScheduler.js";
 
 // Load environment variables
 dotenv.config();
@@ -139,12 +141,13 @@ app.use(globalErrorHandler);
 
 // START SERVER
 server.listen(PORT, () => {
-  // logger.info(`🚀 Server running on port ${PORT}`);
   console.log(`\n========================================`);
   console.log(`🚀 SERVER RUNNING ON PORT ${PORT}`);
   console.log(`🤖 AI PROVIDER: ${process.env.AI_PROVIDER}`);
   console.log(`🔗 WAHA URL: ${process.env.WAHA_API_URL}`);
   console.log(`========================================\n`);
+  startDispatchScheduler();
+  startAutoCancelScheduler();
 });
 
 // Graceful shutdown
@@ -153,6 +156,8 @@ const shutdown = async (signal) => {
 
   server.close(async () => {
     try {
+      stopDispatchScheduler();
+      stopAutoCancelScheduler();
       await redisClient.quit();
       await sequelize.close();
 

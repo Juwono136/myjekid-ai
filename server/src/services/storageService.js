@@ -15,6 +15,23 @@ const minioClient = new Client({
 
 const BUCKET_NAME = process.env.S3_BUCKET_NAME || "myjek-receipts";
 
+/** Download URL ke base64 (satu kali unduh, untuk dipakai AI + upload MinIO). */
+const getBase64FromUrl = async (url) => {
+  try {
+    const headers = {};
+    if (process.env.WAHA_API_KEY) headers["X-Api-Key"] = process.env.WAHA_API_KEY;
+    const response = await axios.get(url, {
+      responseType: "arraybuffer",
+      timeout: 20000,
+      headers,
+    });
+    return Buffer.from(response.data, "binary").toString("base64");
+  } catch (error) {
+    console.error(`Gagal download gambar dari URL: ${error.message}`);
+    return null;
+  }
+};
+
 // Pastikan Bucket Ada saat startup
 (async () => {
   try {
@@ -28,6 +45,8 @@ const BUCKET_NAME = process.env.S3_BUCKET_NAME || "myjek-receipts";
 })();
 
 export const storageService = {
+  getBase64FromUrl,
+
   // DOWNLOAD DARI URL (WAHA) -> UPLOAD KE MINIO
   // Digunakan jika gambar dikirim berupa Link (http://...)
   uploadFileFromUrl: async (sourceUrl, targetFilename) => {

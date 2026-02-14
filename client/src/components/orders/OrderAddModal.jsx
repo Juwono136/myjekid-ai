@@ -18,6 +18,8 @@ const OrderAddModal = ({
     delivery_address: "",
     latitude: null,
     longitude: null,
+    pickup_latitude: null,
+    pickup_longitude: null,
     items: [{ item: "", qty: 1, note: "" }],
     notesList: [""],
   });
@@ -36,6 +38,8 @@ const OrderAddModal = ({
         delivery_address: "",
         latitude: null,
         longitude: null,
+        pickup_latitude: null,
+        pickup_longitude: null,
         items: [{ item: "", qty: 1, note: "" }],
         notesList: [""],
       }));
@@ -148,6 +152,10 @@ const OrderAddModal = ({
       payload.latitude = formData.latitude;
       payload.longitude = formData.longitude;
     }
+    if (formData.pickup_latitude != null && formData.pickup_longitude != null && !Number.isNaN(formData.pickup_latitude) && !Number.isNaN(formData.pickup_longitude)) {
+      payload.pickup_latitude = formData.pickup_latitude;
+      payload.pickup_longitude = formData.pickup_longitude;
+    }
     onSubmit(payload);
   };
 
@@ -259,6 +267,24 @@ const OrderAddModal = ({
                 className="input input-bordered w-full rounded-2xl bg-gray-50 focus:bg-white focus:border-orange-500 focus:ring-2 focus:ring-orange-100"
                 placeholder="Contoh: Kantor BKPSDM"
                 required
+              />
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
+            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60 flex items-center gap-2">
+              <FiMapPin className="text-orange-600" size={16} />
+              <h4 className="text-sm font-bold text-gray-800">Koordinat Titik Alamat Pickup *</h4>
+            </div>
+            <div className="p-4">
+              <p className="text-xs text-gray-500 mb-3">
+                Wajib untuk mencari kurir terdekat. Titik lokasi tempat ambil pesanan. Cari alamat atau klik di peta.
+              </p>
+              <OrderLocationMap
+                latitude={formData.pickup_latitude}
+                longitude={formData.pickup_longitude}
+                initialAddress={formData.pickup_address}
+                onLocationChange={(lat, lng) => setFormData((prev) => ({ ...prev, pickup_latitude: lat, pickup_longitude: lng }))}
               />
             </div>
           </div>

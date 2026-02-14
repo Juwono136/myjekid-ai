@@ -20,8 +20,10 @@ import {
   getAllOrders,
   getOrderById,
   updateOrder,
+  cancelOrder,
   getCustomers,
   createOrderByAdmin,
+  getEligibleCouriersForOrder,
 } from "../controllers/orderController.js";
 import {
   getNotifications,
@@ -57,8 +59,10 @@ router.get("/dashboard/chart", getChartData);
 // Orders Monitor
 router.get("/orders", getAllOrders);
 router.get("/orders/customers", getCustomers);
+router.get("/orders/:id/eligible-couriers", getEligibleCouriersForOrder);
 router.get("/orders/:id", getOrderById);
 router.put("/orders/:id", restrictTo("SUPER_ADMIN", "CS"), updateOrder);
+router.patch("/orders/:id/cancel", restrictTo("SUPER_ADMIN", "CS"), cancelOrder);
 router.post("/orders/by-admin", restrictTo("SUPER_ADMIN", "CS"), createOrderByAdmin);
 
 // INTERVENTION ROUTES

@@ -33,6 +33,8 @@ const Order = sequelize.define(
       type: DataTypes.TEXT,
       allowNull: true, // Boleh kosong jika bukan food delivery
     },
+    pickup_latitude: { type: DataTypes.DOUBLE, allowNull: true },
+    pickup_longitude: { type: DataTypes.DOUBLE, allowNull: true },
 
     delivery_address: DataTypes.TEXT,
 
@@ -50,11 +52,24 @@ const Order = sequelize.define(
       defaultValue: "DRAFT",
     },
     completed_at: DataTypes.DATE,
+
+    offered_courier_ids: {
+      type: DataTypes.JSONB,
+      defaultValue: [],
+      comment: "Daftar courier id yang sudah ditawari order (untuk timeout 3 menit per kurir)",
+    },
+    last_offered_at: { type: DataTypes.DATE, allowNull: true },
   },
   {
     timestamps: true,
     createdAt: "created_at",
     updatedAt: "updated_at",
+    indexes: [
+      { fields: ["status"] },
+      { fields: ["status", "created_at"] },
+      { fields: ["user_phone"] },
+      { fields: ["user_phone", "status"] },
+    ],
   }
 );
 

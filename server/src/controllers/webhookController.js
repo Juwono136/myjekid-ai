@@ -5,10 +5,28 @@ import { handleCourierMessage } from "../services/flows/courierFlow.js";
 import { dispatchService } from "../services/dispatchService.js";
 import { redisClient } from "../config/redisClient.js";
 import { sanitizePhoneNumber } from "../utils/formatter.js";
+
+/**
+ * Pastikan chatId aman untuk balas chat (bukan Status/Story).
+ * - @lid dan @c.us diteruskan apa adanya agar WAHA bisa kirim (LID wajib dipakai untuk pengirim @lid).
+ * - Hanya blokir JID yang memang untuk Status/Broadcast/Newsletter.
+ */
+const toSafeChatId = (rawFrom) => {
+  if (!rawFrom || typeof rawFrom !== "string") return null;
+  const s = rawFrom.trim();
+  if (/status@broadcast|@newsletter|@broadcast/i.test(s)) return null;
+  if (s.toLowerCase() === "status@broadcast") return null;
+  return s;
+};
 import { createSystemNotification } from "./notificationController.js";
 import logger from "../utils/logger.js";
 
-const sanitizeId = (id) => (id ? id.split("@")[0] : "");
+/** Extract JID part before @ and strip optional :N suffix (e.g. 628xxx:0 -> 628xxx) so phone matching works. */
+const sanitizeId = (id) => {
+  if (!id) return "";
+  const beforeAt = id.split("@")[0] || "";
+  return beforeAt.replace(/:[\d]+$/, "");
+};
 
 /** Memastikan nomor punya record di users (untuk FK chat_sessions). Buat user minimal jika belum ada. */
 const ensureUserForPhone = async (phone, defaultName = "User") => {
@@ -57,23 +75,24 @@ const buildPhoneCandidates = (rawPhone) => {
   return Array.from(candidates);
 };
 
-// STANDARD N8N RESPONSE (TEXT)
-const createN8nResponse = (to, body) => {
-  return {
-    action: "reply_text",
-    data: { to: to, body: body },
-  };
+// STANDARD N8N RESPONSE (TEXT) — to = rawFrom; dinormalisasi ke chatId private (@c.us) agar tidak pernah kirim ke Status/Story
+const createN8nResponse = (rawFrom, body) => {
+  const to = toSafeChatId(rawFrom);
+  if (!to) return null;
+  return { action: "reply_text", data: { to, body } };
 };
 
 // N8N RESPONSE (LOCATION)
-const createN8nLocationResponse = (to, lat, long, address, reply) => {
+const createN8nLocationResponse = (rawFrom, lat, long, address, reply) => {
+  const to = toSafeChatId(rawFrom);
+  if (!to) return null;
   return {
     action: "reply_location",
     data: {
-      to: to,
+      to,
       latitude: lat,
       longitude: long,
-      address: address,
+      address: address || "",
       title: "Lokasi",
       reply: reply || "",
     },
@@ -81,15 +100,16 @@ const createN8nLocationResponse = (to, lat, long, address, reply) => {
 };
 
 // N8N RESPONSE (IMAGE)
-const createN8nImageResponse = (to, url, caption) => {
-  return {
-    action: "reply_image",
-    data: {
-      to: to,
-      url: url,
-      caption: caption,
-    },
-  };
+const createN8nImageResponse = (rawFrom, url, caption) => {
+  const to = toSafeChatId(rawFrom);
+  if (!to) return null;
+  return { action: "reply_image", data: { to, url, caption: caption || "" } };
+};
+
+/** Jika response n8n null (chatId tidak aman), kembalikan no_response_needed. */
+const replyOrIgnore = (res, n8nPayload) => {
+  if (n8nPayload) return res.json(n8nPayload);
+  return res.status(200).json({ status: "no_response_needed" });
 };
 
 export const handleIncomingMessage = async (req, res) => {
@@ -107,14 +127,13 @@ export const handleIncomingMessage = async (req, res) => {
 
     if (!allowedTypes.includes(messageType)) {
       console.log(`Ignored unsupported message type: ${messageType}`);
-      return res
-        .status(200)
-        .json(
-          createN8nResponse(
-            payload.from,
-            "🙏 Maaf, saya saat ini hanya menerima Pesan Teks, Lokasi, dan Foto yang berhubungan dengan order MyJek.",
-          ),
-        );
+      return replyOrIgnore(
+        res,
+        createN8nResponse(
+          payload.from,
+          "🙏 Maaf, saya saat ini hanya menerima Pesan Teks, Lokasi, dan Foto yang berhubungan dengan order MyJek.",
+        ),
+      );
     }
 
     // PARSING DATA DASAR
@@ -152,9 +171,13 @@ export const handleIncomingMessage = async (req, res) => {
     const upperBody = messageBody.toUpperCase().trim();
     let n8nResponse = null;
 
-    //CEK MODE TESTING (REDIS)
+    // Redis: ambil testMode + cache kurir dalam satu paralel (kurangi latency)
     const testModeKey = `test_mode:${senderIdClean}`;
-    const testMode = await redisClient.get(testModeKey); // "USER" atau "COURIER"
+    const courierCacheKey = `courier_device:${rawSenderId}`;
+    const [testMode, cachedCourierId] = await Promise.all([
+      redisClient.get(testModeKey),
+      redisClient.get(courierCacheKey),
+    ]);
 
     // LOGIN KURIR (BISA DIPANGGIL DI PRODUCTION / NON-TEST MODE)
     if (upperBody.startsWith("#LOGIN")) {
@@ -162,7 +185,8 @@ export const handleIncomingMessage = async (req, res) => {
       const cleanPhone = sanitizePhoneNumber(inputPhone);
 
       if (!cleanPhone) {
-        return res.json(
+        return replyOrIgnore(
+          res,
           createN8nResponse(
             rawSenderId,
             "Maaf kak, Format Login salah. Silahkan gunakan/ketik: #LOGIN <Nomor HP> (Contoh: #LOGIN 08912345678)",
@@ -173,10 +197,12 @@ export const handleIncomingMessage = async (req, res) => {
       const courierCandidates = buildPhoneCandidates(cleanPhone);
       const courierCandidate = await Courier.findOne({
         where: { phone: { [Op.in]: courierCandidates } },
+        attributes: ["id", "phone", "name", "device_id", "status", "is_active"],
       });
 
       if (!courierCandidate) {
-        return res.json(
+        return replyOrIgnore(
+          res,
           createN8nResponse(
             rawSenderId,
             `Nomor ${inputPhone} tidak terdaftar sebagai kurir. Silahkan hubungi admin.`,
@@ -189,7 +215,8 @@ export const handleIncomingMessage = async (req, res) => {
       const isCurrentlyOnline = courierCandidate.status && courierCandidate.status !== "OFFLINE";
 
       if (isDifferentDevice && isCurrentlyOnline) {
-        return res.json(
+        return replyOrIgnore(
+          res,
           createN8nResponse(
             rawSenderId,
             "Akun kurir ini sudah aktif di perangkat lain. Silahkan hubungi admin jika perlu ganti perangkat.",
@@ -203,10 +230,14 @@ export const handleIncomingMessage = async (req, res) => {
         is_active: true,
       });
       await redisClient.sAdd("online_couriers", String(courierCandidate.id));
+      await redisClient.setEx(`courier_device:${rawSenderId}`, 300, courierCandidate.id);
       await redisClient.del(testModeKey);
-      await dispatchService.offerPendingOrdersToCourier(courierCandidate);
+      dispatchService.offerPendingOrdersToCourier(courierCandidate).catch((err) =>
+        logger.error("offerPendingOrdersToCourier after #LOGIN:", err)
+      );
 
-      return res.json(
+      return replyOrIgnore(
+        res,
         createN8nResponse(
           rawSenderId,
           `✅ LOGIN BERHASIL!\nHalo ${courierCandidate.name}, akun kamu sudah aktif nih. Silahkan ditunggu ordernya masuk yah 😃🙏`,
@@ -214,51 +245,78 @@ export const handleIncomingMessage = async (req, res) => {
       );
     }
 
-    // IDENTIFIKASI PERAN
-    const senderPhoneCandidates = buildPhoneCandidates(senderIdClean);
-    let courier = await Courier.findOne({
-      where: {
-        [Op.or]: [
-          { phone: { [Op.in]: senderPhoneCandidates } },
-          { device_id: rawSenderId },
-        ],
-      },
-    });
-    if (!courier && rawSenderId?.includes("@lid")) {
-      const rawNotifyName = (payload.pushname || payload._data?.notifyName || "").toString();
-      const cleanedName = rawNotifyName
-        .replace(/\(.*?\)/g, "")
-        .replace(/[^\p{L}\p{N}\s]/gu, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-      if (cleanedName) {
-        courier = await Courier.findOne({
-          where: {
-            name: { [Op.iLike]: cleanedName },
-          },
-        });
-        if (!courier) {
+    // IDENTIFIKASI PERAN — cache kurir by device (cachedCourierId dari Redis paralel di atas)
+    let courier = null;
+    if (cachedCourierId) {
+      courier = await Courier.findByPk(cachedCourierId, {
+        attributes: ["id", "phone", "name", "device_id", "status", "is_active"],
+      });
+    }
+    if (!courier) {
+      const senderPhoneCandidates = buildPhoneCandidates(senderIdClean);
+      courier = await Courier.findOne({
+        where: {
+          [Op.or]: [
+            { phone: { [Op.in]: senderPhoneCandidates } },
+            { device_id: rawSenderId },
+          ],
+        },
+        attributes: ["id", "phone", "name", "device_id", "status", "is_active"],
+      });
+      if (!courier && rawSenderId?.includes("@lid")) {
+        const rawNotifyName = (payload.pushname || payload._data?.notifyName || "").toString();
+        const cleanedName = rawNotifyName
+          .replace(/\(.*?\)/g, "")
+          .replace(/[^\p{L}\p{N}\s]/gu, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (cleanedName) {
           courier = await Courier.findOne({
-            where: {
-              name: { [Op.iLike]: `%${cleanedName}%` },
-            },
+            where: { name: { [Op.iLike]: cleanedName } },
+            attributes: ["id", "phone", "name", "device_id", "status", "is_active"],
+          });
+          if (!courier) {
+            courier = await Courier.findOne({
+              where: { name: { [Op.iLike]: `%${cleanedName}%` } },
+              attributes: ["id", "phone", "name", "device_id", "status", "is_active"],
+            });
+          }
+        }
+        if (courier && courier.device_id !== rawSenderId) {
+          await courier.update({ device_id: rawSenderId });
+        }
+      }
+      const wantsOnlineKeyword = /^(#?siap|#?online|online|aktif|kembali)$/i.test(
+        messageBody.trim()
+      );
+      if (!courier && wantsOnlineKeyword) {
+        const phoneCandidates = buildPhoneCandidates(senderIdClean);
+        if (phoneCandidates.length) {
+          courier = await Courier.findOne({
+            where: { phone: { [Op.in]: phoneCandidates } },
+            attributes: ["id", "phone", "name", "device_id", "status", "is_active"],
           });
         }
       }
-      if (courier && courier.device_id !== rawSenderId) {
-        await courier.update({ device_id: rawSenderId });
-      }
+    }
+    if (courier) {
+      await redisClient.setEx(courierCacheKey, 300, courier.id); // 5 menit cache
     }
 
+    const senderPhoneCandidates = buildPhoneCandidates(senderIdClean);
     let isActingAsCourier = false;
     if (testMode === "COURIER") {
       isActingAsCourier = true;
       if (!courier) {
-        const testUser = await User.findOne({ where: { device_id: rawSenderId } });
+        const testUser = await User.findOne({
+          where: { device_id: rawSenderId },
+          attributes: ["phone"],
+        });
         if (testUser) {
           const testUserCandidates = buildPhoneCandidates(testUser.phone);
           courier = await Courier.findOne({
             where: { phone: { [Op.in]: testUserCandidates } },
+            attributes: ["id", "phone", "name", "device_id", "status", "is_active"],
           });
         }
       }
@@ -274,11 +332,12 @@ export const handleIncomingMessage = async (req, res) => {
       // Cek Mode Test
       if (upperBody === "#TEST USER") {
         await redisClient.set(testModeKey, "USER");
-        return res.json(createN8nResponse(rawSenderId, "🛠️ MODE TESTING: AKTIF SEBAGAI USER."));
+        return replyOrIgnore(res, createN8nResponse(rawSenderId, "🛠️ MODE TESTING: AKTIF SEBAGAI USER."));
       }
       if (upperBody === "#TEST KURIR") {
         await redisClient.set(testModeKey, "COURIER");
-        return res.json(
+        return replyOrIgnore(
+          res,
           createN8nResponse(rawSenderId, "🛠️ MODE TESTING: ANDA SUDAH DI MODE KURIR."),
         );
       }
@@ -288,22 +347,30 @@ export const handleIncomingMessage = async (req, res) => {
         const inputPhone = upperBody.replace("#LOGIN", "").trim();
         const cleanPhone = sanitizePhoneNumber(inputPhone);
         if (!cleanPhone)
-          return res.json(
+          return replyOrIgnore(
+            res,
             createN8nResponse(
               rawSenderId,
               "Maaf kak, Format Login salah. Silahkan gunakan/ketik: #LOGIN <Nomor HP> (Contoh: #LOGIN 08912345678)",
             ),
           );
-        const courierCandidate = await Courier.findOne({ where: { phone: cleanPhone } });
+        const courierCandidate = await Courier.findOne({
+          where: { phone: cleanPhone },
+          attributes: ["id", "phone", "name", "device_id", "status", "is_active"],
+        });
         if (!courierCandidate)
-          return res.json(createN8nResponse(rawSenderId, `Nomor ${inputPhone} tidak terdaftar.`));
+          return replyOrIgnore(res, createN8nResponse(rawSenderId, `Nomor ${inputPhone} tidak terdaftar.`));
 
         await courierCandidate.update({ device_id: rawSenderId, status: "IDLE", is_active: true });
         await redisClient.sAdd("online_couriers", String(courierCandidate.id));
+        await redisClient.setEx(`courier_device:${rawSenderId}`, 300, courierCandidate.id);
         await redisClient.del(testModeKey);
-        await dispatchService.offerPendingOrdersToCourier(courierCandidate);
+        dispatchService.offerPendingOrdersToCourier(courierCandidate).catch((err) =>
+          logger.error("offerPendingOrdersToCourier after #LOGIN (flow kurir):", err)
+        );
 
-        return res.json(
+        return replyOrIgnore(
+          res,
           createN8nResponse(
             rawSenderId,
             `✅ LOGIN BERHASIL!\nHalo ${courierCandidate.name}, akun kamu sudah aktif nih. Silahkan ditunggu ordernya masuk yah 😃🙏`,
@@ -314,7 +381,10 @@ export const handleIncomingMessage = async (req, res) => {
       // ChatSession untuk Kurir (intervention / #HUMAN) — butuh user agar FK chat_sessions.phone → users.phone terpenuhi
       const courierPhoneNorm = sanitizePhoneNumber(courier.phone) || courier.phone;
       await ensureUserForPhone(courierPhoneNorm, courier.name || "Kurir");
-      let courierSession = await ChatSession.findOne({ where: { phone: courierPhoneNorm } });
+      let courierSession = await ChatSession.findOne({
+        where: { phone: courierPhoneNorm },
+        attributes: ["phone", "mode", "is_paused_until", "last_interaction"],
+      });
       if (!courierSession) {
         courierSession = await ChatSession.create({
           phone: courierPhoneNorm,
@@ -334,7 +404,8 @@ export const handleIncomingMessage = async (req, res) => {
           actionUrl: "/dashboard/chat",
           extraData: { userName: courier.name || "Kurir" },
         });
-        return res.json(
+        return replyOrIgnore(
+          res,
           createN8nResponse(
             rawSenderId,
             "Sip, percakapan sudah dialihkan ke tim kami. Admin akan segera membalas ya. Terima kasih! 🙏",
@@ -384,7 +455,7 @@ export const handleIncomingMessage = async (req, res) => {
       // Routing Response Kurir
       if (courierReply?.action === "trigger_n8n_image") {
         n8nResponse = createN8nImageResponse(
-          courierReply.data.to,
+          rawSenderId,
           courierReply.data.url,
           courierReply.data.caption,
         );
@@ -404,10 +475,10 @@ export const handleIncomingMessage = async (req, res) => {
 
       if (upperBody === "#TEST KURIR") {
         await redisClient.set(testModeKey, "COURIER");
-        return res.json(createN8nResponse(rawSenderId, "🛠️ MODE TESTING: KEMBALI SEBAGAI KURIR."));
+        return replyOrIgnore(res, createN8nResponse(rawSenderId, "🛠️ MODE TESTING: KEMBALI SEBAGAI KURIR."));
       }
 
-      // Identifikasi User & Registrasi
+      // Identifikasi User & Registrasi (hanya kolom yang dipakai untuk routing + nama)
       let existingUser = await User.findOne({
         where: {
           [Op.or]: [
@@ -415,13 +486,15 @@ export const handleIncomingMessage = async (req, res) => {
             { device_id: rawSenderId },
           ],
         },
+        attributes: ["phone", "name", "device_id"],
       });
 
       // Pelanggan baru: wajib kirim nomor HP dulu. Jika belum terdaftar dan pesan bukan nomor HP valid, langsung balas minta registrasi.
       if (!existingUser) {
         const phoneFromMessage = sanitizePhoneNumber(messageBody);
         if (!phoneFromMessage) {
-          return res.json(
+          return replyOrIgnore(
+            res,
             createN8nResponse(
               rawSenderId,
               `👋 Halo Kak! Selamat datang di MyJek, aplikasi pesan - antar online 😃.\n\nKarena ini pertama kali chat, mohon kirim nomor HP dulu ya.\nContohnya ketik: 08123456789`,
@@ -432,7 +505,10 @@ export const handleIncomingMessage = async (req, res) => {
 
       if (!existingUser && sanitizePhoneNumber(messageBody)) {
         const phoneInput = sanitizePhoneNumber(messageBody);
-        existingUser = await User.findOne({ where: { phone: phoneInput } });
+        existingUser = await User.findOne({
+          where: { phone: phoneInput },
+          attributes: ["phone", "name", "device_id"],
+        });
         if (!existingUser) {
           await User.create({ name: senderName, phone: phoneInput, device_id: rawSenderId });
           n8nResponse = createN8nResponse(
@@ -450,8 +526,11 @@ export const handleIncomingMessage = async (req, res) => {
         if (existingUser) {
           // LOGIC INTERVENTION & HANDOFF
 
-          // Ambil / Buat Sesi Chat
-          let session = await ChatSession.findOne({ where: { phone: existingUser.phone } });
+          // Ambil / Buat Sesi Chat (kolom minimal untuk cek mode & pause)
+          let session = await ChatSession.findOne({
+            where: { phone: existingUser.phone },
+            attributes: ["phone", "mode", "is_paused_until", "last_interaction"],
+          });
           if (!session) {
             session = await ChatSession.create({
               phone: existingUser.phone,
@@ -471,7 +550,8 @@ export const handleIncomingMessage = async (req, res) => {
               actionUrl: "/dashboard/chat",
               extraData: { userName: existingUser.name || "Pelanggan" },
             });
-            return res.json(
+            return replyOrIgnore(
+              res,
               createN8nResponse(
                 rawSenderId,
                 "Sip kak, percakapan sudah dialihkan ke tim kami. Admin akan segera membalas pesan kakak ya. Terima kasih! 🙏",
@@ -640,7 +720,8 @@ export const handleIncomingMessage = async (req, res) => {
     }
     const rawId = req.body?.payload?.from || req.body?.payload?.chatId || "";
     if (rawId) {
-      return res.status(200).json(
+      return replyOrIgnore(
+        res,
         createN8nResponse(
           rawId,
           "Maaf kak, sistem kami sedang mengalami kendala. Percakapan ini kami alihkan ke admin (mode HUMAN) selama 30 menit ya. Mohon tunggu sebentar 🙏",

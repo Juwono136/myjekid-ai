@@ -14,9 +14,21 @@ const orderService = {
     return response.data;
   },
 
+  // Kurir eligible untuk order (idle, shift aktif, terdekat ke lokasi pickup)
+  getEligibleCouriers: async (orderId) => {
+    const response = await api.get(`/orders/${orderId}/eligible-couriers`);
+    return response.data;
+  },
+
   // Update order detail (Admin/CS)
   updateOrder: async (orderId, payload) => {
     const response = await api.put(`/orders/${orderId}`, payload);
+    return response.data;
+  },
+
+  // Batalkan order (Admin/CS) — hanya untuk status DRAFT, PENDING_CONFIRMATION, LOOKING_FOR_DRIVER. Pelanggan dapat notif WA.
+  cancelOrder: async (orderId) => {
+    const response = await api.patch(`/orders/${orderId}/cancel`);
     return response.data;
   },
 

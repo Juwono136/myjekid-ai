@@ -54,6 +54,8 @@ class OrderService {
       order_notes,
       latitude,
       longitude,
+      pickup_latitude,
+      pickup_longitude,
     } = payload;
 
     const normalizedPhone = String(user_phone || "").trim();
@@ -106,6 +108,14 @@ class OrderService {
       items_summary: items,
       order_notes: notesArray,
       pickup_address: pickup_address || "",
+      pickup_latitude:
+        pickup_latitude != null && !Number.isNaN(Number(pickup_latitude))
+          ? Number(pickup_latitude)
+          : null,
+      pickup_longitude:
+        pickup_longitude != null && !Number.isNaN(Number(pickup_longitude))
+          ? Number(pickup_longitude)
+          : null,
       delivery_address: delivery_address || "",
       total_amount: 0,
       status: "LOOKING_FOR_DRIVER",

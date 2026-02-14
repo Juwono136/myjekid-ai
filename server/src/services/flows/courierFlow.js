@@ -90,6 +90,7 @@ const getDashboardReply = (courier) => {
     `➡️ *#INFO* : Cek Status Kurir Saat ini\n` +
     `➡️ *#SELESAI* : Untuk menyelesaian orderan (hanya jika orderan sudah sampai di tujuan)\n` +
     `➡️ *Cek status order* : Untuk Cek Status orderan yang aktif Saat ini\n` +
+    `➡️ *Cek detail order* : Untuk Cek Detail orderan yang aktif Saat ini\n` +
     `➡️ *Cek status kurir* : Untuk Cek Status kurir terkini\n\n` +
     `*PENTING:* Sebagai kurir, kamu wajib aktifkan lokasi terkini dengan cara: 👉 Klik tombol *Clip (📎)* di WA -> Pilih *Location* -> *Send Your Current Location* untuk mendapatkan order. \n\n` +
     `_Tetap semangat & hati-hati di jalan ya kak!_ 😃💪`
@@ -462,6 +463,19 @@ export const handleCourierMessage = async (
       return { reply: `${orderHint}${brief}` };
     }
 
+    // Kurir minta orderan yang tersedia (tanpa order aktif) — cek LOOKING_FOR_DRIVER dan tawarkan ke kurir
+    const wantsAvailableOrders = /(ada orderan|orderan mana|mau (ambil )?order|order dong|tolong order|order baru|ada order|order yang tersedia|mau orderan|orderan dong|kirim order|order kak)/i.test(
+      lowerText,
+    );
+    if (!activeOrder && wantsAvailableOrders) {
+      const hadOffers = await dispatchService.offerPendingOrdersToCourier(courier);
+      const reply =
+        hadOffers
+          ? "Sudah kami cek. Rincian order yang menunggu kurir sudah kami kirim ke kamu ya. Silakan cek pesan di atas 😊"
+          : "Sudah kami cek. Saat ini belum ada order yang menunggu kurir. Kalau ada order baru, kami akan kirim rinciannya ke kamu ya 😊";
+      return { reply };
+    }
+
     if (wantsOffline) {
       if (activeOrder) {
         return {
@@ -513,7 +527,10 @@ export const handleCourierMessage = async (
         is_active: true,
       });
       await redisClient.sAdd("online_couriers", String(courier.id));
-      await dispatchService.offerPendingOrdersToCourier(courier);
+      // Jalankan penawaran order di background agar respons "online" cepat ke kurir
+      dispatchService.offerPendingOrdersToCourier(courier).catch((err) =>
+        console.error("offerPendingOrdersToCourier (background):", err)
+      );
 
       if (!courier.current_latitude || !courier.current_longitude) {
         return {
@@ -528,36 +545,68 @@ export const handleCourierMessage = async (
       return { reply: getDashboardReply(courier) };
     }
 
-    // C. ACTIVE ORDER FLOW (ON_PROCESS / SCAN STRUK)
+    // C. ACTIVE ORDER FLOW (ON_PROCESS / SCAN STRUK) — AI dan upload storage dijalankan paralel agar scan lebih cepat
     const handleScan = async (order) => {
       (async () => {
         try {
           const fileName = `invoice_${order.order_id}_${Date.now()}.jpg`;
           const imageInput = mediaUrl || rawBase64;
-          let storedFileName = null;
+          const isUrl = typeof imageInput === "string" && imageInput.startsWith("http");
           let imageForAI = imageInput;
+          let base64Raw = null;
 
-          try {
-            if (typeof imageInput === "string" && imageInput.startsWith("http")) {
-              storedFileName = await storageService.uploadFileFromUrl(imageInput, fileName);
-            } else {
-              storedFileName = await storageService.uploadBase64(imageInput, fileName);
+          if (isUrl) {
+            base64Raw = await storageService.getBase64FromUrl(imageInput);
+            if (!base64Raw) {
+              const scanFailedReply = await makeCourierReply(
+                "SCAN_FAILED",
+                buildCourierContext({
+                  courier,
+                  order,
+                  items: order.items_summary || [],
+                  pickup: order.pickup_address || "",
+                  address: order.delivery_address || "",
+                  notes: uniqueNotesList(order.order_notes || []),
+                  lastMessage: text,
+                }),
+              );
+              await messageService.sendMessage(courier.phone, scanFailedReply);
+              return;
             }
-          } catch (uploadErr) {
-            console.error("❌ Upload MinIO Error:", uploadErr);
+            imageForAI = `data:image/jpeg;base64,${base64Raw}`;
           }
 
-          if (storedFileName) {
-            const downloadedBase64 = await storageService.downloadFileAsBase64(storedFileName);
-            if (downloadedBase64) {
-              imageForAI = `data:image/jpeg;base64,${downloadedBase64}`;
-            }
-          }
+          const uploadPromise = isUrl
+            ? storageService.uploadBase64(base64Raw, fileName)
+            : storageService.uploadBase64(imageInput, fileName);
 
-          const aiResult = await aiService.readInvoice(
-            imageForAI,
-            order.items_summary,
-          );
+          const [invoiceSettled, uploadSettled] = await Promise.allSettled([
+            aiService.readInvoice(imageForAI, order.items_summary),
+            uploadPromise,
+          ]);
+          const aiResult =
+            invoiceSettled.status === "fulfilled" ? invoiceSettled.value : null;
+          const storedFileName =
+            uploadSettled.status === "fulfilled" ? uploadSettled.value : null;
+          if (uploadSettled.status === "rejected") {
+            console.error("❌ Upload MinIO Error:", uploadSettled.reason);
+          }
+          if (!aiResult) {
+            const scanFailedReply = await makeCourierReply(
+              "SCAN_FAILED",
+              buildCourierContext({
+                courier,
+                order,
+                items: order.items_summary || [],
+                pickup: order.pickup_address || "",
+                address: order.delivery_address || "",
+                notes: uniqueNotesList(order.order_notes || []),
+                lastMessage: text,
+              }),
+            );
+            await messageService.sendMessage(courier.phone, scanFailedReply);
+            return;
+          }
 
           const detectedTotal =
             typeof aiResult === "object" ? aiResult.total : parseInt(aiResult) || 0;

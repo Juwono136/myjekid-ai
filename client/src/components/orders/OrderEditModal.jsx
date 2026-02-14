@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import toast from "react-hot-toast";
 import { FiPlus, FiTrash2, FiX, FiMapPin } from "react-icons/fi";
 import { courierService } from "../../services/courierService";
+import orderService from "../../services/orderService";
 import OrderLocationMap from "./OrderLocationMap.jsx";
 
 const EDITABLE_STATUSES = [
@@ -11,16 +13,24 @@ const EDITABLE_STATUSES = [
   "BILL_VALIDATION",
 ];
 
-const OrderEditModal = ({ isOpen, onClose, order, onSubmit, isLoading }) => {
+const CANCELLABLE_STATUSES = ["DRAFT", "PENDING_CONFIRMATION", "LOOKING_FOR_DRIVER"];
+
+const OrderEditModal = ({ isOpen, onClose, order, onSubmit, isLoading, onCancelSuccess }) => {
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [formData, setFormData] = useState({
     pickup_address: "",
     delivery_address: "",
     latitude: null,
     longitude: null,
+    pickup_latitude: null,
+    pickup_longitude: null,
     items: [],
     notesList: [""],
     courier_id: "",
+    total_amount: 0,
   });
+  const [initialFormData, setInitialFormData] = useState(null);
   const [idleCouriers, setIdleCouriers] = useState([]);
   const [isCourierLoading, setIsCourierLoading] = useState(false);
 
@@ -29,6 +39,36 @@ const OrderEditModal = ({ isOpen, onClose, order, onSubmit, isLoading }) => {
     [order]
   );
   const allowAssignCourier = order?.status === "LOOKING_FOR_DRIVER";
+  const allowCancelOrder = order?.status && CANCELLABLE_STATUSES.includes(order.status);
+
+  const hasChanges = useMemo(() => {
+    if (!initialFormData) return false;
+    const a = formData;
+    const b = initialFormData;
+    if ((a.pickup_address || "").trim() !== (b.pickup_address || "").trim()) return true;
+    if ((a.delivery_address || "").trim() !== (b.delivery_address || "").trim()) return true;
+    const num = (v) => (v != null && !Number.isNaN(Number(v)) ? Number(v) : null);
+    if (num(a.latitude) !== num(b.latitude) || num(a.longitude) !== num(b.longitude)) return true;
+    if (num(a.pickup_latitude) !== num(b.pickup_latitude) || num(a.pickup_longitude) !== num(b.pickup_longitude)) return true;
+    if ((a.courier_id || "") !== (b.courier_id || "")) return true;
+    if (num(a.total_amount) !== num(b.total_amount)) return true;
+    const normItems = (items) =>
+      items.map((i) => ({ item: (i.item || "").trim(), qty: Number(i.qty) || 1, note: (i.note || "").trim() }));
+    const itemsA = normItems(a.items);
+    const itemsB = normItems(b.items);
+    if (itemsA.length !== itemsB.length) return true;
+    for (let i = 0; i < itemsA.length; i++) {
+      if (itemsA[i].item !== itemsB[i].item || itemsA[i].qty !== itemsB[i].qty || itemsA[i].note !== itemsB[i].note) return true;
+    }
+    const normNotes = (list) => list.map((s) => (s || "").trim()).filter(Boolean);
+    const notesA = normNotes(a.notesList);
+    const notesB = normNotes(b.notesList);
+    if (notesA.length !== notesB.length) return true;
+    for (let i = 0; i < notesA.length; i++) {
+      if (notesA[i] !== notesB[i]) return true;
+    }
+    return false;
+  }, [formData, initialFormData]);
 
   useEffect(() => {
     if (!isOpen || !order) return;
@@ -50,11 +90,15 @@ const OrderEditModal = ({ isOpen, onClose, order, onSubmit, isLoading }) => {
 
     const lat = order.user?.latitude != null ? Number(order.user.latitude) : null;
     const lng = order.user?.longitude != null ? Number(order.user.longitude) : null;
-    setFormData({
+    const pickupLat = order.pickup_latitude != null ? Number(order.pickup_latitude) : null;
+    const pickupLng = order.pickup_longitude != null ? Number(order.pickup_longitude) : null;
+    const next = {
       pickup_address: order.pickup_address || "",
       delivery_address: order.delivery_address || "",
       latitude: lat,
       longitude: lng,
+      pickup_latitude: pickupLat,
+      pickup_longitude: pickupLng,
       items:
         parsedItems.length > 0
           ? parsedItems.map((item) => ({
@@ -65,19 +109,32 @@ const OrderEditModal = ({ isOpen, onClose, order, onSubmit, isLoading }) => {
           : [{ item: "", qty: 1, note: "" }],
       notesList: parsedNotes.length > 0 ? parsedNotes : [""],
       courier_id: order.courier?.id || "",
-    });
+      total_amount:
+        order.total_amount != null && order.total_amount !== ""
+          ? Number(order.total_amount)
+          : 0,
+    };
+    setFormData(next);
+    setInitialFormData(next);
   }, [isOpen, order]);
 
   useEffect(() => {
     if (!isOpen) return;
-    setIsCourierLoading(true);
-    courierService
-      .getCouriers({ page: 1, limit: 50, status: "IDLE" })
-      .then((res) => {
-        setIdleCouriers(res.data || []);
-      })
-      .finally(() => setIsCourierLoading(false));
-  }, [isOpen]);
+    if (allowAssignCourier && order?.order_id) {
+      setIsCourierLoading(true);
+      orderService
+        .getEligibleCouriers(order.order_id)
+        .then((res) => setIdleCouriers(res?.data || []))
+        .catch(() => setIdleCouriers([]))
+        .finally(() => setIsCourierLoading(false));
+    } else {
+      setIsCourierLoading(true);
+      courierService
+        .getCouriers({ page: 1, limit: 50, status: "IDLE" })
+        .then((res) => setIdleCouriers(res.data || []))
+        .finally(() => setIsCourierLoading(false));
+    }
+  }, [isOpen, order?.order_id, allowAssignCourier]);
 
   const updateItem = (index, key, value) => {
     setFormData((prev) => {
@@ -113,6 +170,26 @@ const OrderEditModal = ({ isOpen, onClose, order, onSubmit, isLoading }) => {
       notesList: prev.notesList.filter((_, i) => i !== index),
     }));
 
+  const handleCancelOrderClick = () => {
+    if (order?.order_id) setShowCancelConfirm(true);
+  };
+
+  const handleCancelOrderConfirm = () => {
+    if (!order?.order_id) return;
+    setShowCancelConfirm(false);
+    setIsCancelling(true);
+    orderService
+      .cancelOrder(order.order_id)
+      .then(() => {
+        toast.success("Order dibatalkan. Pelanggan telah diberitahu.");
+        onCancelSuccess?.();
+      })
+      .catch((err) => {
+        toast.error(err?.response?.data?.message || "Gagal membatalkan order.");
+      })
+      .finally(() => setIsCancelling(false));
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!order) return;
@@ -133,8 +210,21 @@ const OrderEditModal = ({ isOpen, onClose, order, onSubmit, isLoading }) => {
       payload.latitude = formData.latitude;
       payload.longitude = formData.longitude;
     }
+    if (formData.pickup_latitude != null && formData.pickup_longitude != null && !Number.isNaN(formData.pickup_latitude) && !Number.isNaN(formData.pickup_longitude)) {
+      payload.pickup_latitude = formData.pickup_latitude;
+      payload.pickup_longitude = formData.pickup_longitude;
+    }
     if (allowAssignCourier && formData.courier_id) {
       payload.courier_id = formData.courier_id;
+    }
+    if (order?.status === "BILL_VALIDATION") {
+      const totalAmount =
+        formData.total_amount != null && formData.total_amount !== ""
+          ? Number(formData.total_amount)
+          : 0;
+      if (!Number.isNaN(totalAmount) && totalAmount >= 0) {
+        payload.total_amount = totalAmount;
+      }
     }
     onSubmit(payload);
   };
@@ -142,6 +232,7 @@ const OrderEditModal = ({ isOpen, onClose, order, onSubmit, isLoading }) => {
   if (!isOpen) return null;
 
   return (
+    <>
     <div className="modal modal-open bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-6">
       <div className="modal-box w-full max-w-4xl p-0 overflow-hidden rounded-2xl shadow-2xl relative max-h-[92vh] flex flex-col">
         <div className="bg-gradient-to-r from-gray-700 to-gray-800 px-4 sm:px-6 py-4 border-b border-gray-600 flex flex-row justify-between items-start gap-2 shrink-0">
@@ -214,6 +305,25 @@ const OrderEditModal = ({ isOpen, onClose, order, onSubmit, isLoading }) => {
                     onChange={(e) => setFormData({ ...formData, delivery_address: e.target.value })}
                     className="input input-bordered w-full rounded-2xl bg-gray-50 focus:bg-white focus:border-orange-500 focus:ring-2 focus:ring-orange-100 focus:outline-none transition"
                     placeholder="Contoh: Kantor BKPSDM"
+                    disabled={!isEditable}
+                  />
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
+                <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60 flex items-center gap-2">
+                  <FiMapPin className="text-orange-600" size={16} />
+                  <h4 className="text-sm font-bold text-gray-800">Koordinat Titik Alamat Pickup</h4>
+                </div>
+                <div className="p-4">
+                  <p className="text-xs text-gray-500 mb-3">
+                    Titik lokasi tempat ambil pesanan. Dipakai untuk mencari kurir terdekat. Cari alamat atau klik di peta.
+                  </p>
+                  <OrderLocationMap
+                    latitude={formData.pickup_latitude}
+                    longitude={formData.pickup_longitude}
+                    initialAddress={formData.pickup_address}
+                    onLocationChange={(lat, lng) => setFormData((prev) => ({ ...prev, pickup_latitude: lat, pickup_longitude: lng }))}
                     disabled={!isEditable}
                   />
                 </div>
@@ -345,6 +455,36 @@ const OrderEditModal = ({ isOpen, onClose, order, onSubmit, isLoading }) => {
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {order?.status === "BILL_VALIDATION" && (
+                  <div className="form-control">
+                    <label className="label text-xs font-bold text-gray-500 uppercase">
+                      Total Tagihan (Rp)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={formData.total_amount}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        if (raw === "") {
+                          setFormData({ ...formData, total_amount: 0 });
+                          return;
+                        }
+                        const num = parseInt(raw, 10);
+                        if (!Number.isNaN(num) && num >= 0) {
+                          setFormData({ ...formData, total_amount: num });
+                        }
+                      }}
+                      className="input input-bordered w-full rounded-2xl bg-gray-50 focus:bg-white focus:border-orange-500 focus:ring-2 focus:ring-orange-100 focus:outline-none transition"
+                      placeholder="0"
+                      disabled={!isEditable}
+                    />
+                    <p className="text-xs text-gray-400 mt-1">
+                      Koreksi total tagihan order (setelah struk).
+                    </p>
+                  </div>
+                )}
                 <div className="form-control lg:col-span-2">
                   <label className="label text-xs font-bold text-gray-500 uppercase">
                     Assign Kurir (IDLE)
@@ -356,7 +496,7 @@ const OrderEditModal = ({ isOpen, onClose, order, onSubmit, isLoading }) => {
                     disabled={!isEditable || !allowAssignCourier}
                   >
                     <option value="">
-                      {allowAssignCourier ? "Pilih kurir IDLE" : "Hanya untuk status LOOKING_FOR_DRIVER"}
+                      {allowAssignCourier ? "Pilih kurir (idle + shift + terdekat pickup)" : "Hanya untuk status LOOKING_FOR_DRIVER"}
                     </option>
                     {isCourierLoading ? (
                       <option value="">Memuat kurir...</option>
@@ -370,33 +510,77 @@ const OrderEditModal = ({ isOpen, onClose, order, onSubmit, isLoading }) => {
                   </select>
                   {allowAssignCourier && (
                     <p className="text-xs text-gray-400 mt-2">
-                      Hanya kurir dengan status IDLE yang dapat ditugaskan.
+                      Daftar kurir idle sesuai shift aktif dan terdekat dengan lokasi pickup order.
                     </p>
                   )}
                 </div>
               </div>
 
-          <div className="pt-4 pb-2 flex flex-col-reverse sm:flex-row gap-3 justify-end border-t border-gray-100">
-            <button
-              type="button"
-              onClick={onClose}
-              className="btn flex-1 sm:flex-none px-5 py-2.5 bg-gray-100 border border-gray-200 text-gray-700 hover:bg-gray-200 rounded-xl font-medium"
-            >
-              Batal
-            </button>
-            <button
-              type="submit"
-              disabled={!isEditable || isLoading}
-              className="btn flex-1 sm:flex-none bg-[#f14c06] px-5 py-2.5 hover:bg-[#d14306] border-none text-white rounded-xl font-medium shadow-md"
-            >
-              {isLoading ? "Menyimpan..." : "Simpan Perubahan"}
-            </button>
+          <div className="pt-4 pb-2 flex flex-col-reverse sm:flex-row gap-3 sm:gap-4 justify-between items-stretch sm:items-center border-t border-gray-100">
+            <div className="flex flex-col-reverse sm:flex-row gap-3 sm:gap-3 justify-end sm:justify-start order-2 sm:order-1">
+              {allowCancelOrder && (
+                <button
+                  type="button"
+                  onClick={handleCancelOrderClick}
+                  disabled={isCancelling}
+                  className="btn px-5 py-2.5 bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 rounded-xl font-medium"
+                >
+                  {isCancelling ? "Membatalkan..." : "Batalkan order"}
+                </button>
+              )}
+            </div>
+            <div className="flex flex-col sm:flex-row gap-3 sm:gap-3 order-1 sm:order-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="btn flex-1 sm:flex-none px-5 py-2.5 bg-gray-100 border border-gray-200 text-gray-700 hover:bg-gray-200 rounded-xl font-medium"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                disabled={!isEditable || isLoading || !hasChanges}
+                className="btn flex-1 sm:flex-none bg-[#f14c06] px-5 py-2.5 hover:bg-[#d14306] border-none text-white rounded-xl font-medium shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isLoading ? "Menyimpan..." : "Simpan Perubahan"}
+              </button>
+            </div>
           </div>
             </>
           )}
         </form>
       </div>
     </div>
+
+    {showCancelConfirm && (
+      <div className="modal modal-open bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+        <div className="modal-box max-w-md rounded-2xl shadow-2xl border border-red-100">
+          <h3 className="font-bold text-lg text-gray-800">Batalkan order?</h3>
+          <p className="py-3 text-gray-600 text-sm">
+            Pelanggan akan menerima notifikasi pembatalan via WhatsApp. Tindakan ini tidak dapat dibatalkan.
+          </p>
+          <div className="modal-action justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShowCancelConfirm(false)}
+              className="btn px-4 py-2 bg-gray-100 border border-gray-200 text-gray-700 hover:bg-gray-200 rounded-xl font-medium"
+            >
+              Tidak
+            </button>
+            <button
+              type="button"
+              onClick={handleCancelOrderConfirm}
+              disabled={isCancelling}
+              className="btn px-4 py-2 bg-red-600 hover:bg-red-700 border-none text-white rounded-xl font-medium"
+            >
+              {isCancelling ? "Membatalkan..." : "Ya, batalkan"}
+            </button>
+          </div>
+        </div>
+        <div className="modal-backdrop bg-black/30" onClick={() => setShowCancelConfirm(false)} aria-hidden="true" />
+      </div>
+    )}
+    </>
   );
 };
 

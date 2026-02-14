@@ -159,20 +159,22 @@ class AIService {
       --- KONTEKS: BUAT ORDER BARU (bukan update order berjalan) ---
       Status 1, 2, 3, 3a, 3b, 3c dipakai HANYA saat pelanggan sedang MEMBUAT order baru.
       Alur pesan: (1) Tampilkan detail order, (2) Tanya konfirmasi koordinat — alamat antarnya masih sama atau beda? Kalau beda silakan update dulu (instruksi kirim lokasi), (3) Konfirmasi terakhir: balas OK/Ya sebelum pesanan beneran dibuat dan kami carikan kurir. Gunakan kalimat natural dan tidak kaku.
+      ATURAN UMUM BUAT ORDER BARU (DRAFT/PENDING_CONFIRMATION): Setiap balasan WAJIB (1) menampilkan ringkasan order yang sudah ada (item, pickup, antar — isi dengan "-" atau "belum diisi" hanya jika benar-benar kosong), (2) menyebut apa yang masih kurang atau langkah berikutnya, (3) memberi instruksi yang jelas dan relevan dengan chat terakhir pelanggan agar pelanggan tidak bingung. Jangan lompat ke topik lain; respons harus nyambung dengan yang pelanggan kirim. JANGAN duplikasi: alamat antar tampilkan HANYA SEKALI. context.address = hanya lokasi/tempat pengantaran; context.notes = catatan (titip/serah terima); jangan gabung catatan ke dalam alamat.
 
       1) ORDER_DRAFT_SUMMARY / ORDER_SUMMARY / ORDER_SUMMARY_NEED_LOCATION / ORDER_SUMMARY_ADDRESS_UPDATED:
          - Jika context.order_id atau context.short_code ada, WAJIB tampilkan di baris pertama setelah "Pesanan kami catat ya": "🆔 Order ID: {order_id} | Kode: {short_code}" (baris baru lalu baris ini).
-         - Format:
+         - Format (TANPA duplikasi — alamat antar HANYA sekali):
            "Siap kak {nama} 😊
             Pesanan kami catat ya:
             {Jika order_id/short_code ada: baris 🆔 Order ID: {order_id} | Kode: {short_code}}
-            📍 Alamat pickup: {pickup atau -}
-            📍 Alamat antar: {address atau -}
+            📍 Alamat pickup: {pickup atau - jika kosong}
+            📍 Alamat antar: {address atau - jika kosong — GUNAKAN context.address, JANGAN gabung dengan catatan titip}
+            📦 Detail Pesanan:
             {daftar item}
-            {Catatan: jika ada, tampilkan dengan bullet}
-            {Jika alamat belum ada: minta alamat pengantaran}
-            {Jika alamat ada: tampilkan '📍 Alamat pengantaran: {address}'}
-            {Jika butuh lokasi: konfirmasi dulu — koordinat alamat antarnya masih sama atau sudah beda? Kalau beda silakan update dulu (instruksi kirim lokasi). Kalau masih sama atau sudah update, balas OK/Ya untuk konfirmasi terakhir supaya pesanan kami proses dan carikan kurir.}"
+            {Jika context.notes ada: baris Catatan: lalu bullet list catatan}
+            {Satu blok instruksi singkat: jika address kosong → minta sebutkan alamat pengantaran + setelah itu sebutkan alamat pickup jika belum. Jika address ada tapi pickup kosong → minta alamat pickup. Jika address dan pickup ada → konfirmasi singkat (alamat antar sudah kami catat) dan minta balas OK/Ya untuk konfirmasi terakhir supaya pesanan kami proses dan carikan kurir. Jika butuh koordinat → satu kalimat minta kirim lokasi (Clip 📎 -> Location) lalu OK/Ya untuk konfirmasi. JANGAN ulangi kalimat yang sama dua kali.}"
+         - KRITIKAL: Jika context.address ada dan tidak kosong, WAJIB isi "📍 Alamat antar:" dengan context.address (bukan "-"). JANGAN tampilkan baris "📍 Alamat pengantaran" atau "Alamat pengantaran:" terpisah — cukup SATU baris "📍 Alamat antar:" untuk lokasi; catatan titip HANYA di bagian Catatan (bullet), bukan di dalam alamat.
+         - Contoh format benar (ada alamat + catatan titip): "📍 Alamat antar: Kantor BKPSDM, ruang Pak Samsi" lalu di bawah Detail Pesanan: "Catatan:\n• Bilang aja titipan dari Bu Titin." SALAH: menambah baris "📍 Alamat pengantaran: kantor bkpsdm ... bilang aja titipan dari bu titin" — itu duplikasi dan menggabung lokasi dengan catatan.
       2) ORDER_SUMMARY (FINAL CONFIRM) — hanya untuk BUAT ORDER BARU:
          - Jika context.order_id atau context.short_code ada, WAJIB tampilkan di baris pertama setelah "Ini ringkasannya ya": "🆔 Order ID: {order_id} | Kode: {short_code}" (baris baru lalu baris ini).
          - Format:
@@ -227,6 +229,7 @@ class AIService {
             Tetap diantar ke {address} ya kak ✔️
             Kalau sudah sesuai, balas *OK/Ya* ya kak — baru kami simpan ke database dan infokan ke kurir 🙏
             Kalau masih mau ubah atau tambah lagi, tinggal kabari saja, nanti konfirmasi OK/Ya lagi ya."
+         - WAJIB hanya tampilkan bullet point yang BENAR-BENAR ADA di context.update_items dan context.update_notes. JANGAN tambah atau asumsikan update lain (mis. jangan sebut "Update alamat pickup" jika tidak ada di context.update_items; jika pelanggan hanya kirim alamat antar, tampilkan hanya "Update alamat antar").
          - Gunakan context.update_items untuk bullet item (format item biasa). Jika hanya update_notes, tampilkan sebagai bullet "Catatan: {note}".
          - Jangan tampilkan detail order lengkap (items/pickup/antar/catatan) kecuali show_details = true.
          - Jika context.flags.address_update_blocked atau pickup_update_blocked = true, tambahkan kalimat singkat bahwa alamat pickup/antar tidak bisa diubah saat pesanan sedang berjalan.
@@ -259,10 +262,13 @@ class AIService {
          - Dikirim saat pesanan sudah berhasil dibuat tapi tidak ada kurir yang tersedia (semua offline/sibuk/suspend).
          - Sapa dengan nama (kak {nama}), sampaikan bahwa saat ini semua kurir sedang offline atau sibuk. Gunakan kalimat natural dan hangat, tidak kaku.
          - Beri tahu bahwa pesanan tetap tercatat dan akan dicarikan kurir begitu ada yang tersedia. Ajak untuk sabar menunggu atau cek lagi sebentar lagi.
-         - Contoh gaya: "Halo kak {nama} 😊 Pesanan kamu sudah kami catat ya. Sayangnya untuk saat ini semua kurir lagi offline/sibuk nih, jadi belum ada yang bisa kami tugaskan. Pesanan kamu tetap aman dan akan kami carikan kurir begitu ada yang ready. Mohon ditunggu sebentar ya kak, atau bisa cek lagi nanti. Terima kasih ya! 🙏"
+         - Contoh gaya: "Halo kak {nama} 😊 Pesanan kamu sudah kami catat ya. Sayangnya untuk saat ini semua kurir lagi offline/sibuk nih, jadi belum ada yang bisa kami tugaskan. Pesanan kamu tetap aman dan akan kami carikan kurir begitu ada yang ready. Mohon ditunggu sebentar ya kak, atau bisa cek lagi nanti dengan ketik *cek status order*. Terima kasih ya! 🙏"
          - Jangan tampilkan detail order (item/pickup/antar). Singkat, informatif, dan meyakinkan.
       7) UNKNOWN_COMMAND / NO_ACTIVE_ORDER / ASK_ITEMS / ASK_PICKUP / ASK_ADDRESS:
-         - Jawab singkat dan jelas sesuai konteks.
+         - Jawab singkat dan jelas sesuai konteks. Respons harus nyambung dengan chat terakhir pelanggan; jangan ulangi kalimat yang sama dua kali.
+         - Jika show_details = true (saat pelanggan buat order baru): WAJIB tampilkan ringkasan order yang sudah ada (item, pickup, antar — gunakan "-" atau "belum diisi" hanya jika kosong), sebut apa yang masih kurang, dan beri instruksi langkah berikutnya yang jelas.
+         - ASK_PICKUP: Jika context.address juga kosong, sebutkan sekali saja "Yang masih kurang: alamat pickup dan alamat antar." Lalu satu kalimat instruksi: sebutkan alamat pickup dulu, lalu alamat antar; setelah itu balas OK/Ya. Jangan ucapkan "Setelah itu, balas OK/Ya..." berulang. Jika context.address sudah ada, cukup minta alamat pickup.
+         - ASK_ADDRESS: Minta sebutkan alamat pengantaran. Satu kalimat instruksi singkat. Jika show_details, boleh sertakan ringkasan item; jangan duplikasi blok yang sama.
       7d) ORDER_IN_PROGRESS (CUSTOMER — pelanggan minta tambah/ubah order padahal punya order aktif):
          - Jika context.flags.order_update_blocked = true ATAU context.order_status = BILL_SENT atau COMPLETED: WAJIB balasan MENOLAK update dengan sopan. Jangan tampilkan "Pesanan kamu sudah kami catat" atau blok detail order seolah update diterima. Format: sapa (kak {nama}), lalu "Mohon maaf kak, saat ini orderan tidak bisa diupdate lagi karena " + alasan: jika BILL_SENT → "pesanan sudah dalam proses antar (kurir sedang menuju lokasi antar)."; jika COMPLETED → "pesanan sudah selesai." Tutup dengan kalimat ramah (mis. "Kalau mau pesan lagi, silakan order baru ya kak 😊").
          - Jika order_update_blocked = false (mis. ON_PROCESS/BILL_VALIDATION): boleh jelaskan bahwa pesanan sedang dalam proses dan tidak bisa diubah, singkat dan ramah. Jangan tampilkan detail order lengkap seolah update diterima.
@@ -517,15 +523,54 @@ class AIService {
       "CANCELLED",
     ];
     const showHumanFootnote = orderStatus && ORDER_STATUSES_WITH_HUMAN_FOOTNOTE.includes(orderStatus);
+    const statusAlreadyHasHumanNote =
+      responseSpec?.status === "COURIER_ASSIGNED" || responseSpec?.status === "ORDER_TAKEN";
+    // Format untuk WhatsApp: dua baris kosong (enter 2x) lalu teks miring. WhatsApp mendukung _teks_ untuk italic.
     const HUMAN_MODE_FOOTNOTE_CUSTOMER =
-      "\n\n_Catatan: jika saya salah dalam memahami maksud kakak atau terdapat komplain/masalah tentang proses order, silahkan ketik #HUMAN untuk beralih ke human mode, nanti akan ada admin yang chat kakak ya, mohon maaf sebelumnya kak 😅🙏_";
+      "\n\n\n_Catatan: jika saya salah dalam memahami maksud kakak atau terdapat komplain/masalah tentang proses order, silahkan ketik #HUMAN untuk beralih ke human mode, nanti akan ada admin yang chat kakak ya, mohon maaf sebelumnya kak 😅🙏_";
     const HUMAN_MODE_FOOTNOTE_COURIER =
-      "\n\n_Catatan: jika ada kendala atau komplain, ketik #HUMAN untuk beralih ke human mode ya, nanti admin yang akan bantu._";
-    if (showHumanFootnote && role === "CUSTOMER" && typeof reply === "string" && reply.trim()) {
+      "\n\n\n_Catatan: jika ada kendala atau komplain, ketik #HUMAN untuk beralih ke human mode ya, nanti admin yang akan bantu._";
+
+    if (statusAlreadyHasHumanNote && typeof reply === "string" && reply.trim()) {
+      // COURIER_ASSIGNED / ORDER_TAKEN: AI sudah sertakan Catatan #HUMAN tapi format sering tidak terbaca (enter 2x + miring). Hapus versi AI lalu tambahkan footnote berformat tetap.
+      reply = reply.replace(/\s*Catatan:.*#HUMAN.*$/im, "").trimEnd();
+      if (role === "CUSTOMER") reply = reply.trimEnd() + HUMAN_MODE_FOOTNOTE_CUSTOMER;
+      else if (role === "COURIER") reply = reply.trimEnd() + HUMAN_MODE_FOOTNOTE_COURIER;
+    } else if (
+      showHumanFootnote &&
+      role === "CUSTOMER" &&
+      typeof reply === "string" &&
+      reply.trim()
+    ) {
       reply = reply.trimEnd() + HUMAN_MODE_FOOTNOTE_CUSTOMER;
-    }
-    if (showHumanFootnote && role === "COURIER" && typeof reply === "string" && reply.trim()) {
+    } else if (
+      showHumanFootnote &&
+      role === "COURIER" &&
+      typeof reply === "string" &&
+      reply.trim()
+    ) {
       reply = reply.trimEnd() + HUMAN_MODE_FOOTNOTE_COURIER;
+    }
+
+    // Post-process: hapus baris duplikat "Alamat pengantaran" jika sudah ada "Alamat antar" (alamat cukup sekali)
+    const summaryStatuses = [
+      "ORDER_DRAFT_SUMMARY",
+      "ORDER_SUMMARY",
+      "ORDER_SUMMARY_NEED_LOCATION",
+      "ORDER_SUMMARY_ADDRESS_UPDATED",
+    ];
+    if (
+      role === "CUSTOMER" &&
+      summaryStatuses.includes(responseSpec?.status) &&
+      typeof reply === "string" &&
+      /Alamat antar:/i.test(reply)
+    ) {
+      reply = reply
+        .split(/\r?\n/)
+        .filter((line) => !/^\s*📍?\s*Alamat pengantaran\s*:/i.test(line.trim()))
+        .join("\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
     }
 
     return reply;
