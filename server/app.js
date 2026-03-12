@@ -192,6 +192,4 @@ const shutdown = async (signal) => {
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
 
-// Tidak perlu export default app jika server.listen sudah dijalankan di sini
-// Tapi jika dibutuhkan untuk testing, export server-nya
 export default server;
