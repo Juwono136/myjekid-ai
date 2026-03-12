@@ -3,8 +3,9 @@ import { Op } from "sequelize";
 import AppError from "../utils/AppError.js";
 import logger from "../utils/logger.js";
 import { sanitizePhoneNumber } from "../utils/formatter.js";
-import { dispatchService } from "../services/dispatchService.js";
 import { redisClient } from "../config/redisClient.js";
+
+import { BASE_CAMP_LAT, BASE_CAMP_LNG } from "../config/baseCamp.js";
 
 // Get all couriers
 export const getAllCouriers = async (req, res, next) => {
@@ -100,14 +101,30 @@ export const createCourier = async (req, res, next) => {
       return next(new AppError(`No HP ${cleanPhone} sudah terdaftar.`, 400));
     }
 
-    // Create Data
+    // Create Data — status IDLE (online) saat pertama ditambahkan admin
+    // Set koordinat default ke base camp dengan sedikit random offset agar tidak menumpuk persis di satu titik
+    const randomOffsetLat = (Math.random() - 0.5) * 0.001;
+    const randomOffsetLng = (Math.random() - 0.5) * 0.001;
+    
     const newCourier = await Courier.create({
       name,
       phone: cleanPhone,
       shift_code: shift_code || 1,
-      status: "OFFLINE",
+      status: "IDLE",
       is_active: true,
+      current_latitude: BASE_CAMP_LAT + randomOffsetLat,
+      current_longitude: BASE_CAMP_LNG + randomOffsetLng,
     });
+
+    await redisClient.sAdd("online_couriers", String(newCourier.id));
+
+    const { dispatchService } = await import("../services/dispatchService.js");
+    dispatchService
+      .offerPendingOrdersToCourier(newCourier, 5, { forceOfferToThisCourier: true })
+      .then((n) => {
+        if (n > 0) logger.info(`Offered ${n} pending order(s) to new courier ${newCourier.id}.`);
+      })
+      .catch((err) => logger.error(`offerPendingOrdersToCourier for new courier: ${err.message}`));
 
     logger.info(`New courier added by Admin: ${name} (${cleanPhone})`);
 
@@ -131,7 +148,6 @@ export const updateCourier = async (req, res, next) => {
 
     const courier = await Courier.findByPk(id);
     if (!courier) return next(new AppError("Kurir tidak ditemukan", 404));
-    const previousStatus = courier.status;
 
     // Update Name
     if (name) courier.name = name;
@@ -153,9 +169,9 @@ export const updateCourier = async (req, res, next) => {
 
     if (shift_code) courier.shift_code = shift_code;
     if (status) {
-      const allowedStatuses = ["OFFLINE", "SUSPEND"];
+      const allowedStatuses = ["OFFLINE", "IDLE", "SUSPEND"];
       if (!allowedStatuses.includes(status)) {
-        return next(new AppError("Status hanya bisa diubah ke OFFLINE atau SUSPEND.", 400));
+        return next(new AppError("Status hanya bisa diubah ke OFFLINE, IDLE, atau SUSPEND.", 400));
       }
       if (courier.current_order_id) {
         const activeOrder = await Order.findOne({
@@ -175,9 +191,11 @@ export const updateCourier = async (req, res, next) => {
       }
 
       courier.status = status;
-      courier.is_active = false;
       if (status === "OFFLINE") {
         courier.device_id = null;
+      }
+      if (status === "SUSPEND") {
+        courier.is_active = false;
       }
     }
     if (is_active !== undefined) courier.is_active = is_active;
@@ -193,7 +211,19 @@ export const updateCourier = async (req, res, next) => {
     await courier.save();
 
     if (status) {
-      await redisClient.sRem("online_couriers", String(courier.id));
+      if (status === "OFFLINE" || status === "SUSPEND") {
+        await redisClient.sRem("online_couriers", String(courier.id));
+      } else if (status === "IDLE" && courier.is_active !== false) {
+        await redisClient.sAdd("online_couriers", String(courier.id));
+        // Langsung tawarkan order LOOKING_FOR_DRIVER ke kurir ini (1 pesan WA per order)
+        const { dispatchService } = await import("../services/dispatchService.js");
+        dispatchService
+          .offerPendingOrdersToCourier(courier, 5, { forceOfferToThisCourier: true })
+          .then((n) => {
+            if (n > 0) logger.info(`Offered ${n} pending order(s) to courier ${courier.id} after set IDLE.`);
+          })
+          .catch((err) => logger.error(`offerPendingOrdersToCourier after set IDLE: ${err.message}`));
+      }
     }
 
     logger.info(`Courier data updated: ${courier.name} (ID: ${id})`);

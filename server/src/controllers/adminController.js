@@ -2,7 +2,7 @@ import { Op, QueryTypes } from "sequelize";
 import bcrypt from "bcryptjs";
 import AppError from "../utils/AppError.js";
 import logger from "../utils/logger.js";
-import { Admin, Order, Courier, ChatSession, sequelize } from "../models/index.js";
+import { Admin, Order, Courier, ChatSession, User, sequelize } from "../models/index.js";
 import {
   validateAndNormalizePhoneNumber,
   validateEmail,
@@ -245,7 +245,7 @@ export const getDashboardStats = async (req, res, next) => {
       where: { status: { [Op.notIn]: ["COMPLETED", "CANCELLED"] } },
     });
 
-    // Recent Orders
+    // Recent Orders (dengan user untuk nama pelanggan)
     const recentOrders = await Order.findAll({
       limit: 5,
       order: [["created_at", "DESC"]],
@@ -254,9 +254,10 @@ export const getDashboardStats = async (req, res, next) => {
         "total_amount",
         "status",
         "created_at",
-        "items_summary",
+        "chat_messages",
         "user_phone",
       ],
+      include: [{ model: User, as: "user", attributes: ["name", "phone"], required: false }],
     });
 
     res.status(200).json({

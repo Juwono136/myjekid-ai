@@ -21,24 +21,20 @@ export const getHandoffEmailTemplate = (data) => {
         </div>
         <div class="content">
           <p>Halo Admin,</p>
-          <p>Sistem mendeteksi permintaan intervensi manual (Human Handoff) dari pengguna:</p>
+          <p>Ada pelanggan butuh bantuan (mode Human).</p>
           
           <table style="width: 100%; margin-top: 10px; border-collapse: collapse;">
             <tr>
-              <td style="padding: 5px 0; font-weight: bold; width: 100px;">Nama User:</td>
+              <td style="padding: 5px 0; font-weight: bold; width: 100px;">Nama:</td>
               <td>${userName}</td>
             </tr>
             <tr>
-              <td style="padding: 5px 0; font-weight: bold;">No. Telepon:</td>
+              <td style="padding: 5px 0; font-weight: bold;">No. HP:</td>
               <td>${userPhone}</td>
             </tr>
           </table>
 
-          <div class="alert-box">
-            "${message}"
-          </div>
-
-          <p>Bot telah dimatikan sementara untuk user ini. Silakan ambil alih percakapan melalui dashboard.</p>
+          <p>Silakan balas percakapan dari dashboard.</p>
           
           <div style="text-align: center;">
             <a href="${dashboardUrl}" target="_blank"

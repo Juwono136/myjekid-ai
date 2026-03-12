@@ -1,4 +1,17 @@
 import { Order, Courier, User, sequelize } from "../models/index.js";
+import { redisClient } from "../config/redisClient.js";
+
+const SHIFT_1_START = Number(process.env.SHIFT_1_START) || 6;
+const SHIFT_1_END = Number(process.env.SHIFT_1_END) || 14;
+const SHIFT_2_START = Number(process.env.SHIFT_2_START) || 14;
+const SHIFT_2_END = Number(process.env.SHIFT_2_END) || 22;
+
+function isInShiftNow(shiftCode, date = new Date()) {
+  const hour = date.getHours();
+  if (shiftCode === 1) return hour >= SHIFT_1_START && hour < SHIFT_1_END;
+  if (shiftCode === 2) return hour >= SHIFT_2_START && hour < SHIFT_2_END;
+  return false;
+}
 
 class OrderService {
   // Membuat Order Baru dari Data Ekstraksi AI
@@ -7,17 +20,20 @@ class OrderService {
       const orderId = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
       const shortCode = await this.generateShortCode();
 
+      const chatMessages = Array.isArray(aiData.chat_messages)
+        ? aiData.chat_messages
+        : aiData.original_message
+        ? [aiData.original_message]
+        : [];
       const newOrder = await Order.create({
         order_id: orderId,
         short_code: shortCode,
         user_phone: userPhone,
-        raw_message: aiData.original_message || "Order from Bot",
-        items_summary: aiData.items,
-        pickup_address: aiData.pickup_location || "",
-        delivery_address: aiData.delivery_address || "",
+        chat_messages: chatMessages,
         total_amount: 0,
         status: "DRAFT",
       });
+      await User.update({ order_id: orderId }, { where: { phone: userPhone } });
 
       console.log(`✅ Order Created: ${newOrder.order_id} for ${userPhone}`);
       return newOrder;
@@ -45,18 +61,7 @@ class OrderService {
    * Jika user_phone belum ada di User, akan dibuat user baru.
    */
   async createByAdmin(payload) {
-    const {
-      user_phone,
-      customer_name,
-      pickup_address,
-      delivery_address,
-      items_summary,
-      order_notes,
-      latitude,
-      longitude,
-      pickup_latitude,
-      pickup_longitude,
-    } = payload;
+    const { user_phone, customer_name, chat_messages: chatMessagesPayload } = payload;
 
     const normalizedPhone = String(user_phone || "").trim();
     if (!normalizedPhone) {
@@ -68,58 +73,27 @@ class OrderService {
       user = await User.create({
         phone: normalizedPhone,
         name: (customer_name || "").trim() || "Pelanggan",
-        ...(latitude != null && longitude != null && !Number.isNaN(Number(latitude)) && !Number.isNaN(Number(longitude))
-          ? { latitude: Number(latitude), longitude: Number(longitude) }
-          : {}),
       });
-    } else {
-      const updates = {};
-      if (customer_name && String(customer_name).trim()) updates.name = String(customer_name).trim();
-      if (latitude != null && longitude != null && !Number.isNaN(Number(latitude)) && !Number.isNaN(Number(longitude))) {
-        updates.latitude = Number(latitude);
-        updates.longitude = Number(longitude);
-      }
-      if (Object.keys(updates).length) await user.update(updates);
+    } else if (customer_name && String(customer_name).trim()) {
+      await user.update({ name: String(customer_name).trim() });
     }
 
     const orderId = `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const shortCode = await this.generateShortCode();
 
-    const notesArray = Array.isArray(order_notes)
-      ? order_notes
-          .map((n) => (typeof n === "string" ? n : n?.note))
-          .filter(Boolean)
-          .map((note) => ({ note, at: new Date().toISOString() }))
-      : [];
-
-    const items = Array.isArray(items_summary)
-      ? items_summary.map((i) => ({
-          item: i.item || "Item",
-          qty: Number(i.qty) || 1,
-          note: i.note || "",
-        }))
+    const chatMessages = Array.isArray(chatMessagesPayload)
+      ? chatMessagesPayload.map((m) => (typeof m === "string" ? m : m?.body ?? String(m)))
       : [];
 
     const newOrder = await Order.create({
       order_id: orderId,
       short_code: shortCode,
       user_phone: user.phone,
-      raw_message: "Order dibuat oleh admin",
-      items_summary: items,
-      order_notes: notesArray,
-      pickup_address: pickup_address || "",
-      pickup_latitude:
-        pickup_latitude != null && !Number.isNaN(Number(pickup_latitude))
-          ? Number(pickup_latitude)
-          : null,
-      pickup_longitude:
-        pickup_longitude != null && !Number.isNaN(Number(pickup_longitude))
-          ? Number(pickup_longitude)
-          : null,
-      delivery_address: delivery_address || "",
+      chat_messages: chatMessages.length ? chatMessages : ["Order dibuat oleh admin"],
       total_amount: 0,
       status: "LOOKING_FOR_DRIVER",
     });
+    await User.update({ order_id: orderId }, { where: { phone: user.phone } });
 
     console.log(`✅ Order by Admin: ${newOrder.order_id} for ${user.phone}`);
     return { order: newOrder, user };
@@ -158,7 +132,7 @@ class OrderService {
         await transaction.rollback();
         return {
           success: false,
-          message: "Status kamu belum online. Ketik #SIAP untuk menerima order baru.",
+          message: "Status kamu belum idle. Hubungi admin untuk mengaktifkan.",
         };
       }
 
@@ -202,16 +176,26 @@ class OrderService {
     }
   }
 
-  // Simpan Draft Scan Tagihan (Sementara)
+  // Simpan Draft Scan Tagihan (Sementara). Saat pertama (dari struk) set receipt_total; saat revisi kurir hanya update total_amount.
   async saveBillDraft(orderId, total, imageUrl) {
-    return await Order.update(
-      {
-        total_amount: total,
-        invoice_image_url: imageUrl,
-        status: "BILL_VALIDATION",
-      },
-      { where: { order_id: orderId } }
-    );
+    const order = await Order.findOne({ where: { order_id: orderId }, attributes: ["status", "receipt_total", "invoice_image_url"] });
+    if (!order) return null;
+    const updates = {
+      total_amount: total,
+      invoice_image_url: imageUrl || order.invoice_image_url,
+      status: "BILL_VALIDATION",
+    };
+    // receipt_total = total dari struk (OCR). Jika kurir kirim ulang struk (replace) saat ON_PROCESS/BILL_VALIDATION,
+    // update receipt_total agar mencerminkan struk terbaru. Revisi manual (ketik angka) tidak mengubah receipt_total.
+    const isReceiptScan =
+      Boolean(imageUrl) && ["ON_PROCESS", "BILL_VALIDATION"].includes(order.status);
+    const isNewReceiptImage =
+      Boolean(imageUrl) && String(imageUrl) !== String(order.invoice_image_url || "");
+    if (isReceiptScan && (order.receipt_total == null || isNewReceiptImage)) {
+      updates.receipt_total = total;
+    }
+    const [affected] = await Order.update(updates, { where: { order_id: orderId } });
+    return affected;
   }
 
   // Finalisasi Tagihan (Siap dikirim ke User)
@@ -236,17 +220,42 @@ class OrderService {
   async completeOrder(orderId, courierId) {
     const transaction = await sequelize.transaction();
     try {
+      const order = await Order.findOne({ where: { order_id: orderId }, attributes: ["user_phone"], transaction });
+      const courier = await Courier.findOne({
+        where: { id: courierId },
+        attributes: ["id", "shift_code", "is_active", "status"],
+        transaction,
+      });
       await Order.update(
         { status: "COMPLETED", completed_at: new Date() },
         { where: { order_id: orderId }, transaction }
       );
 
+      // Jika shift kurir sudah lewat, jangan langsung OFFLINE saat masih BUSY.
+      // Tapi saat order selesai dan kurir kembali IDLE, baru boleh OFFLINE jika memang sudah di luar jam shift.
+      const nextStatus =
+        courier && courier.is_active && isInShiftNow(courier.shift_code) ? "IDLE" : "OFFLINE";
+
       await Courier.update(
-        { status: "IDLE", last_job_time: new Date(), current_order_id: null },
+        { status: nextStatus, last_job_time: new Date(), current_order_id: null },
         { where: { id: courierId }, transaction }
       );
-
+      if (order?.user_phone) {
+        await User.update({ order_id: null, last_order_date: new Date() }, { where: { phone: order.user_phone }, transaction });
+      }
       await transaction.commit();
+
+      // Sinkronkan set online_couriers untuk dispatch (di luar transaksi DB).
+      try {
+        if (nextStatus === "IDLE") {
+          await redisClient.sAdd("online_couriers", String(courierId));
+        } else {
+          await redisClient.sRem("online_couriers", String(courierId));
+        }
+      } catch (e) {
+        console.error("Redis online_couriers sync error:", e.message);
+      }
+
       return true;
     } catch (error) {
       await transaction.rollback();

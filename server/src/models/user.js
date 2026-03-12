@@ -18,9 +18,7 @@ const User = sequelize.define(
       type: DataTypes.STRING(100),
       allowNull: false,
     },
-    address_text: DataTypes.TEXT,
-    latitude: { type: DataTypes.FLOAT, allowNull: true },
-    longitude: { type: DataTypes.FLOAT, allowNull: true },
+    order_id: { type: DataTypes.STRING(50), allowNull: true },
     last_order_date: DataTypes.DATE,
   },
   {

@@ -35,6 +35,7 @@ import {
   getChatHistory,
   sendMessageToUser,
   toggleSessionMode,
+  proxyMedia,
 } from "../controllers/interventionController.js";
 import {
   exportTransactionReport,
@@ -42,6 +43,7 @@ import {
   getRevenueChart,
   getTransactionReports,
 } from "../controllers/reportController.js";
+import { getBaseCamp } from "../controllers/configController.js";
 
 const router = express.Router();
 
@@ -51,6 +53,9 @@ router.post("/auth/login", loginAdmin);
 // PROTECTED ROUTES (Harus Login)
 // Semua route di bawah baris ini akan dicek tokennya
 router.use(verifyToken);
+
+// Config (base camp untuk Live Map)
+router.get("/config/base-camp", getBaseCamp);
 
 // Dashboard Overview
 router.get("/dashboard/stats", getDashboardStats);
@@ -68,6 +73,7 @@ router.post("/orders/by-admin", restrictTo("SUPER_ADMIN", "CS"), createOrderByAd
 // INTERVENTION ROUTES
 router.get("/intervention/sessions", getActiveSessions);
 router.get("/intervention/history/:phone", getChatHistory);
+router.get("/intervention/media-proxy", proxyMedia);
 router.post("/intervention/send", sendMessageToUser);
 router.post("/intervention/toggle-mode", toggleSessionMode);
 

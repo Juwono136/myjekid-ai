@@ -3,11 +3,22 @@ import { Op } from "sequelize";
 import AppError from "../utils/AppError.js";
 import logger from "../utils/logger.js";
 import { sequelize } from "../config/database.js";
-import { aiService } from "../services/ai/AIService.js";
 import { messageService } from "../services/messageService.js";
+import { courierAssignedByAdmin, customerCourierAssignedByAdmin } from "../constants/messageTemplates.js";
 import { orderService } from "../services/orderService.js";
 import { dispatchService } from "../services/dispatchService.js";
-import { cancelOrderAndNotify } from "../services/autoCancelOrderService.js";
+import { redisClient } from "../config/redisClient.js";
+
+const cancelOrderAndNotify = async (order, source = "admin") => {
+  await order.update({ status: "CANCELLED" });
+  await redisClient.zRem("order_confirm_waiting", order.order_id);
+  await User.update({ order_id: null }, { where: { order_id: order.order_id } });
+  const phone = order.user_phone;
+  if (phone && String(phone).trim().startsWith("62")) {
+    const msg = "Maaf kak, pesanan kakak telah dibatalkan oleh admin. Jika ada pertanyaan, silakan ketik #HUMAN untuk berbicara dengan admin. 🙏";
+    await messageService.sendMessage(phone, msg).catch(() => {});
+  }
+};
 
 const normalizeNotesList = (notes = []) =>
   Array.isArray(notes)
@@ -20,22 +31,19 @@ const normalizeNotesList = (notes = []) =>
 const buildLocationLinkMessage = (userName, mapLink) =>
   `Kak ${userName || "pelanggan"}, berikut titik lokasi alamat antarnya ya. Bisa dibuka di Google Maps untuk panduan kurir:\n${mapLink}`;
 
-/** Pesan ke pelanggan ketika order baru dibuat oleh admin (belum ada kurir) — format mirip COURIER_ASSIGNED tapi tanpa info kurir */
+/** Pesan ke pelanggan ketika order baru dibuat oleh admin (belum ada kurir). */
 const buildOrderCreatedByAdminCustomerMessage = (order, user) => {
-  const items = order.items_summary || [];
-  const itemsList = items.map((i) => `- ${i.item} (x${i.qty})${(i.note && ` - ${i.note}`) || ""}`).join("\n");
-  const notes = normalizeNotesList(order.order_notes || []);
-  const notesList = notes.length ? `Catatan:\n${notes.map((n) => `- ${n}`).join("\n")}` : "";
   const customerName = user?.name || "Pelanggan";
+  const chatBlock =
+    Array.isArray(order.chat_messages) && order.chat_messages.length > 0
+      ? "\n\n📋 Pesan order:\n" + order.chat_messages.map((m) => (typeof m === "string" ? m : m?.body ?? "")).join("\n")
+      : "";
   return (
     `Pesanan sudah kami catat kak ${customerName} 😊\n\n` +
-    `🆔 Order ID: ${order.order_id} | Kode: ${order.short_code || "-"}\n\n` +
-    `📦 Detail Pesanan:\n${itemsList || "-"}\n\n` +
-    `📍 Pickup dari: ${order.pickup_address || "-"}\n` +
-    `📍 Antar ke: ${order.delivery_address || "-"}\n` +
-    (notesList ? `${notesList}\n\n` : "\n") +
-    `Kami sedang carikan kurir. Silakan tunggu ya kak.\n\n` +
-    `Catatan: jika saya salah dalam memahami maksud kakak atau terdapat komplain/masalah tentang proses order, silahkan ketik #HUMAN untuk beralih ke human mode, nanti akan ada admin yang chat kakak ya, mohon maaf sebelumnya kak 😅🙏`
+    `🆔 Order ID: ${order.order_id} | Kode: ${order.short_code || "-"}\n` +
+    chatBlock +
+    `\n\nKami sedang carikan kurir. Silakan tunggu ya kak.\n\n` +
+    `Catatan: jika ada komplain/masalah, ketik #HUMAN untuk beralih ke tim kami. 🙏`
   );
 };
 
@@ -119,7 +127,7 @@ export const getOrderById = async (req, res, next) => {
         {
           model: User,
           as: "user",
-          attributes: ["name", "phone", "latitude", "longitude"],
+          attributes: ["name", "phone"],
         },
         {
           model: Courier,
@@ -143,22 +151,11 @@ export const getOrderById = async (req, res, next) => {
   }
 };
 
-// Update order detail (Admin/CS)
+// Update order detail (Admin/CS) — hanya chat_messages, total_amount, invoice_image_url, courier_id
 export const updateOrder = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const {
-      items_summary,
-      pickup_address,
-      delivery_address,
-      order_notes,
-      courier_id,
-      latitude,
-      longitude,
-      pickup_latitude,
-      pickup_longitude,
-      total_amount: totalAmountBody,
-    } = req.body;
+    const { chat_messages: chatMessagesBody, invoice_image_url: invoiceUrl, courier_id } = req.body;
 
     const order = await Order.findOne({ where: { order_id: id } });
     if (!order) {
@@ -178,55 +175,13 @@ export const updateOrder = async (req, res, next) => {
 
     const updates = {};
 
-    if (items_summary !== undefined) {
-      if (!Array.isArray(items_summary)) {
-        return next(new AppError("Format items_summary harus berupa array.", 400));
-      }
-      updates.items_summary = items_summary.map((item) => ({
-        item: item.item || "Item",
-        qty: Number(item.qty) || 1,
-        note: item.note || "",
-      }));
+    if (Array.isArray(chatMessagesBody)) {
+      updates.chat_messages = chatMessagesBody.map((m) => (typeof m === "string" ? m : m?.body ?? String(m)));
     }
 
-    if (pickup_address !== undefined) {
-      updates.pickup_address = pickup_address || "";
-    }
 
-    if (delivery_address !== undefined) {
-      updates.delivery_address = delivery_address || "";
-    }
-
-    if (pickup_latitude != null && !Number.isNaN(Number(pickup_latitude))) {
-      updates.pickup_latitude = Number(pickup_latitude);
-    }
-    if (pickup_longitude != null && !Number.isNaN(Number(pickup_longitude))) {
-      updates.pickup_longitude = Number(pickup_longitude);
-    }
-
-    if (totalAmountBody !== undefined) {
-      const totalAmount = Number(totalAmountBody);
-      if (Number.isNaN(totalAmount) || totalAmount < 0) {
-        return next(new AppError("Total tagihan harus angka tidak negatif.", 400));
-      }
-      updates.total_amount = totalAmount;
-    }
-
-    if (order_notes !== undefined) {
-      if (!Array.isArray(order_notes)) {
-        return next(new AppError("Format order_notes harus berupa array.", 400));
-      }
-      updates.order_notes = order_notes
-        .map((note) => (typeof note === "string" ? note : note?.note))
-        .filter(Boolean)
-        .map((note) => ({ note, at: new Date().toISOString() }));
-    }
-
-    if (latitude != null && longitude != null && !Number.isNaN(Number(latitude)) && !Number.isNaN(Number(longitude))) {
-      const user = await User.findByPk(order.user_phone);
-      if (user) {
-        await user.update({ latitude: Number(latitude), longitude: Number(longitude) });
-      }
+    if (invoiceUrl !== undefined) {
+      updates.invoice_image_url = invoiceUrl == null ? null : String(invoiceUrl);
     }
 
     if (courier_id) {
@@ -266,95 +221,34 @@ export const updateOrder = async (req, res, next) => {
       const refreshed = await Order.findOne({
         where: { order_id: id },
         include: [
-          { model: User, as: "user", attributes: ["name", "phone", "latitude", "longitude"] },
+          { model: User, as: "user", attributes: ["name", "phone"] },
           { model: Courier, as: "courier", attributes: ["id", "name", "phone", "status"] },
         ],
       });
 
-      // Balas cepat ke admin; notifikasi WA ke kurir & pelanggan dikirim di background agar simpan tidak lambat
-      const payloadForNotify = {
-        refreshed,
-        latitude,
-        longitude,
-      };
       setImmediate(async () => {
         try {
-          const toText = (r) =>
-            typeof r === "string" ? r : (r && (r.reply || r.ai_reply)) || "";
-          const { refreshed: ref } = payloadForNotify;
-          const lat =
-            payloadForNotify.latitude != null && !Number.isNaN(Number(payloadForNotify.latitude))
-              ? Number(payloadForNotify.latitude)
-              : ref?.user?.latitude;
-          const lng =
-            payloadForNotify.longitude != null && !Number.isNaN(Number(payloadForNotify.longitude))
-              ? Number(payloadForNotify.longitude)
-              : ref?.user?.longitude;
-
-          const [courierReply, customerReply] = await Promise.all([
-            ref?.courier?.phone
-              ? aiService.generateReply({
-                  role: "COURIER",
-                  status: "ORDER_TAKEN",
-                  context: {
-                    role: "COURIER",
-                    courier_name: ref?.courier?.name || "Kurir",
-                    courier_status: ref?.courier?.status || "BUSY",
-                    order_status: ref?.status,
-                    order_id: ref?.order_id,
-                    short_code: ref?.short_code,
-                    items: ref?.items_summary || [],
-                    pickup: ref?.pickup_address || "",
-                    address: ref?.delivery_address || "",
-                    notes: normalizeNotesList(ref?.order_notes || []),
-                    user_name: ref?.user?.name || "Pelanggan",
-                    user_phone: ref?.user?.phone || ref?.user_phone || "",
-                    flags: {
-                      customer_name: ref?.user?.name || "Pelanggan",
-                      customer_phone: ref?.user?.phone || ref?.user_phone || "",
-                      show_details: true,
-                    },
-                    last_message: "",
-                  },
-                })
-              : null,
-            ref?.user_phone
-              ? aiService.generateReply({
-                  role: "CUSTOMER",
-                  status: "COURIER_ASSIGNED",
-                  context: {
-                    role: "CUSTOMER",
-                    user_name: ref?.user?.name || "Customer",
-                    order_status: ref?.status,
-                    order_id: ref?.order_id,
-                    short_code: ref?.short_code,
-                    items: ref?.items_summary || [],
-                    pickup: ref?.pickup_address || "",
-                    address: ref?.delivery_address || "",
-                    notes: normalizeNotesList(ref?.order_notes || []),
-                    courier_name: ref?.courier?.name || "Kurir",
-                    courier_phone: ref?.courier?.phone || "",
-                  },
-                })
-              : null,
-          ]);
-
+          const ref = refreshed;
+          const chatMessages = ref?.chat_messages || [];
           if (ref?.courier?.phone) {
-            const courierText = toText(courierReply);
-            if (courierText) {
-              await messageService.sendMessage(ref.courier.phone, courierText);
-            }
-            if (lat != null && lng != null) {
-              const mapLink = `https://maps.google.com/maps?q=${lat},${lng}&z=17&hl=id`;
-              const locationMessage = buildLocationLinkMessage(ref?.courier?.name, mapLink);
-              await messageService.sendMessage(ref.courier.phone, locationMessage);
-            }
+            const courierText = courierAssignedByAdmin(
+              ref.courier?.name,
+              ref?.user?.name || "Pelanggan",
+              ref?.user?.phone || ref?.user_phone || "",
+              chatMessages
+            );
+            await messageService.sendMessage(ref.courier.phone, courierText).catch((e) => logger.error("Assign notify courier:", e.message));
           }
-          if (ref?.user_phone) {
-            const customerText = toText(customerReply);
-            if (customerText) {
-              await messageService.sendMessage(ref.user_phone, customerText);
-            }
+          if (ref?.user_phone && String(ref.user_phone).trim().startsWith("62")) {
+            const customerText = customerCourierAssignedByAdmin(
+              ref?.user?.name || "Pelanggan",
+              ref?.order_id,
+              ref?.short_code,
+              ref?.courier?.name || "Kurir",
+              ref?.courier?.phone || "",
+              chatMessages
+            );
+            await messageService.sendMessage(ref.user_phone, customerText).catch((e) => logger.error("Assign notify customer:", e.message));
           }
         } catch (err) {
           logger.error(`Error send assign notifications: ${err.message}`);
@@ -376,93 +270,6 @@ export const updateOrder = async (req, res, next) => {
         { model: User, as: "user", attributes: ["name", "phone"] },
         { model: Courier, as: "courier", attributes: ["id", "name", "phone", "status"] },
       ],
-    });
-
-    const updateItems = Array.isArray(items_summary) ? items_summary : [];
-    const updateNotes = normalizeNotesList(order_notes || []);
-    const addressChanged =
-      pickup_address !== undefined || delivery_address !== undefined;
-    const effectiveUpdateItems = !updateItems.length && !updateNotes.length && addressChanged
-      ? [
-          ...(pickup_address !== undefined ? [{ item: "Update alamat pickup", qty: 1 }] : []),
-          ...(delivery_address !== undefined ? [{ item: "Update alamat antar", qty: 1 }] : []),
-        ]
-      : updateItems;
-
-    // Balas cepat ke admin; notifikasi WA dikirim di background agar simpan tidak lambat
-    const updateNotifyPayload = {
-      refreshed,
-      effectiveUpdateItems,
-      updateNotes,
-      latitude,
-      longitude,
-    };
-    setImmediate(async () => {
-      try {
-        const toText = (r) =>
-          typeof r === "string" ? r : (r && (r.reply || r.ai_reply)) || "";
-        const ref = updateNotifyPayload.refreshed;
-
-        const customerReply = await aiService.generateReply({
-          role: "CUSTOMER",
-          status: "ORDER_UPDATE_APPLIED",
-          context: {
-            role: "CUSTOMER",
-            user_name: ref?.user?.name || "Customer",
-            order_status: ref?.status,
-            items: ref?.items_summary || [],
-            pickup: ref?.pickup_address || "",
-            address: ref?.delivery_address || "",
-            notes: normalizeNotesList(ref?.order_notes || []),
-            update_items: updateNotifyPayload.effectiveUpdateItems,
-            update_notes: updateNotifyPayload.updateNotes,
-            flags: { show_details: false },
-            last_message: "",
-          },
-        });
-        if (ref?.user_phone) {
-          const customerText = toText(customerReply);
-          if (customerText) await messageService.sendMessage(ref.user_phone, customerText);
-        }
-
-        if (ref?.courier?.phone) {
-          const courierReply = await aiService.generateReply({
-            role: "COURIER",
-            status: "ORDER_UPDATE_APPLIED",
-            context: {
-              role: "COURIER",
-              courier_name: ref?.courier?.name || "Kurir",
-              order_status: ref?.status,
-              order_id: ref?.order_id || null,
-              short_code: ref?.short_code || null,
-              items: ref?.items_summary || [],
-              pickup: ref?.pickup_address || "",
-              address: ref?.delivery_address || "",
-              notes: normalizeNotesList(ref?.order_notes || []),
-              flags: { show_details: true },
-              last_message: "",
-            },
-            required_phrases: [
-              "Halo rider, ada update pesanan order dari pelanggan nih! 😊",
-              "Berikut detail ordernya saat ini:",
-            ],
-          });
-          const courierText = toText(courierReply);
-          if (courierText) await messageService.sendMessage(ref.courier.phone, courierText);
-          if (
-            updateNotifyPayload.latitude != null &&
-            updateNotifyPayload.longitude != null &&
-            !Number.isNaN(Number(updateNotifyPayload.latitude)) &&
-            !Number.isNaN(Number(updateNotifyPayload.longitude))
-          ) {
-            const mapLink = `https://maps.google.com/maps?q=${Number(updateNotifyPayload.latitude)},${Number(updateNotifyPayload.longitude)}&z=17&hl=id`;
-            const locationMessage = buildLocationLinkMessage(ref?.courier?.name, mapLink);
-            await messageService.sendMessage(ref.courier.phone, locationMessage);
-          }
-        }
-      } catch (err) {
-        logger.error(`Error send update notifications: ${err.message}`);
-      }
     });
 
     return res.status(200).json({
@@ -555,50 +362,23 @@ export const getCustomers = async (req, res, next) => {
 // Buat order oleh admin; status langsung LOOKING_FOR_DRIVER; kirim ke customer & dispatch ke kurir
 export const createOrderByAdmin = async (req, res, next) => {
   try {
-    const {
-      user_phone,
-      customer_name,
-      pickup_address,
-      delivery_address,
-      items_summary,
-      order_notes,
-      latitude,
-      longitude,
-      pickup_latitude,
-      pickup_longitude,
-    } = req.body;
+    const { user_phone, customer_name, chat_messages: chatMessagesBody } = req.body;
 
-    if (!user_phone || !delivery_address) {
-      return next(new AppError("Nomor HP dan alamat antar wajib diisi.", 400));
+    if (!user_phone || !String(user_phone).trim()) {
+      return next(new AppError("Nomor HP pelanggan wajib diisi.", 400));
     }
-    if (!Array.isArray(items_summary) || items_summary.length === 0) {
-      return next(new AppError("Minimal satu item pesanan wajib diisi.", 400));
-    }
-    const hasPickupCoords =
-      pickup_latitude != null &&
-      pickup_longitude != null &&
-      !Number.isNaN(Number(pickup_latitude)) &&
-      !Number.isNaN(Number(pickup_longitude));
-    if (!hasPickupCoords) {
-      return next(
-        new AppError(
-          "Koordinat titik alamat pickup wajib diisi agar order bisa dicarikan kurir terdekat.",
-          400,
-        ),
-      );
+
+    const chatMessages = Array.isArray(chatMessagesBody)
+      ? chatMessagesBody.map((m) => (typeof m === "string" ? m : m?.body ?? String(m))).filter(Boolean)
+      : [];
+    if (chatMessages.length === 0) {
+      return next(new AppError("Minimal satu pesan order (chat_messages) wajib diisi.", 400));
     }
 
     const { order, user } = await orderService.createByAdmin({
       user_phone: String(user_phone).trim(),
       customer_name: customer_name ? String(customer_name).trim() : null,
-      pickup_address: pickup_address ? String(pickup_address).trim() : "",
-      delivery_address: String(delivery_address).trim(),
-      items_summary,
-      order_notes: Array.isArray(order_notes) ? order_notes : [],
-      latitude: latitude != null && !Number.isNaN(Number(latitude)) ? Number(latitude) : null,
-      longitude: longitude != null && !Number.isNaN(Number(longitude)) ? Number(longitude) : null,
-      pickup_latitude: pickup_latitude != null && !Number.isNaN(Number(pickup_latitude)) ? Number(pickup_latitude) : null,
-      pickup_longitude: pickup_longitude != null && !Number.isNaN(Number(pickup_longitude)) ? Number(pickup_longitude) : null,
+      chat_messages: chatMessages,
     });
 
     const orderWithUser = await Order.findByPk(order.order_id, {

@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from "react-leaflet";
+import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { createCustomIcon } from "../../utils/MapIcons";
 import toast from "react-hot-toast";
@@ -15,27 +16,39 @@ const MapUpdater = ({ center, zoom }) => {
     } else {
       toast.error("Koordinat tidak valid atau kurir baru pertama kali ditambahkan.");
     }
-  }, [center, zoom, map, toast]);
+  }, [center, zoom, map]);
   return null;
 };
 
-const CourierMap = ({ couriers, selectedCourier, onMarkerClick }) => {
-  // Koordinat Default (Sumbawa besar)
+const baseCampIcon = L.divIcon({
+  html: `<div class="flex items-center justify-center w-10 h-10 rounded-full border-2 border-white shadow-lg bg-amber-500 text-white font-bold text-sm">BC</div>`,
+  className: "custom-leaflet-icon",
+  iconSize: [40, 40],
+  iconAnchor: [20, 40],
+  popupAnchor: [0, -45],
+});
+
+const CourierMap = ({ couriers, selectedCourier, onMarkerClick, baseCamp }) => {
+  // Koordinat Default (Sumbawa Besar)
   const defaultCenter = [-8.504146, 117.428485];
 
-  // Tentukan pusat peta: Jika ada yang dipilih, fokus ke dia. Jika tidak, default.
-  const mapCenter = selectedCourier ? [selectedCourier.lat, selectedCourier.lng] : defaultCenter;
+  // Tentukan pusat peta: Jika ada yang dipilih, fokus ke dia. Jika tidak, default atau base camp.
+  const mapCenter = selectedCourier
+    ? [selectedCourier.lat, selectedCourier.lng]
+    : baseCamp
+    ? [baseCamp.lat, baseCamp.lng]
+    : defaultCenter;
 
-  const zoomLevel = selectedCourier ? 16 : 12;
+  const zoomLevel = selectedCourier ? 16 : baseCamp ? 13 : 12;
 
   return (
     <div className="h-full w-full rounded-2xl overflow-hidden shadow-inner border border-gray-200 relative z-0">
       <MapContainer
-        center={defaultCenter}
-        zoom={15}
+        center={baseCamp ? [baseCamp.lat, baseCamp.lng] : defaultCenter}
+        zoom={13}
         scrollWheelZoom={true}
         className="h-full w-full"
-        zoomControl={false} // custom zoom control
+        zoomControl={false}
       >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
@@ -43,6 +56,28 @@ const CourierMap = ({ couriers, selectedCourier, onMarkerClick }) => {
         />
 
         <MapUpdater center={mapCenter} zoom={zoomLevel} />
+
+        {baseCamp && (
+          <>
+            <Circle
+              center={[baseCamp.lat, baseCamp.lng]}
+              radius={baseCamp.radius_km * 1000}
+              pathOptions={{
+                color: "#d97706",
+                fillColor: "#f59e0b",
+                fillOpacity: 0.12,
+                weight: 2,
+              }}
+            />
+            <Marker position={[baseCamp.lat, baseCamp.lng]} icon={baseCampIcon}>
+              <Popup>
+                <span className="font-semibold">{baseCamp.label || "Base Camp"}</span>
+                <br />
+                <span className="text-xs text-gray-500">Radius {baseCamp.radius_km} km</span>
+              </Popup>
+            </Marker>
+          </>
+        )}
 
         {couriers.map((courier) => (
           <Marker

@@ -1,10 +1,21 @@
 import { Op } from "sequelize";
-import { User, Courier, ChatSession, TrainingData } from "../models/index.js";
+import { User, Courier, ChatSession, TrainingData, Order } from "../models/index.js";
 import { handleUserMessage } from "../services/flows/userFlow.js";
-import { handleCourierMessage } from "../services/flows/courierFlow.js";
-import { dispatchService } from "../services/dispatchService.js";
+import {
+  looksLikeShortCode,
+  handleCourierTakeByShortCode,
+} from "../services/courierTakeByShortCodeService.js";
 import { redisClient } from "../config/redisClient.js";
-import { sanitizePhoneNumber } from "../utils/formatter.js";
+import { sanitizePhoneNumber, extractCanonicalPhoneFromWaFrom } from "../utils/formatter.js";
+import { enqueue, enqueuePresence } from "../services/messageQueueService.js";
+import { getPhoneByLid } from "../services/messageService.js";
+import { isBlockedPhone } from "../config/chatbotBlocklist.js";
+import {
+  handleCourierStrukImage,
+  handleCourierConfirmBill,
+  handleCourierReviseBill,
+  handleCourierSelesai,
+} from "../services/courierOrderFlowService.js";
 
 /**
  * Pastikan chatId aman untuk balas chat (bukan Status/Story).
@@ -75,15 +86,28 @@ const buildPhoneCandidates = (rawPhone) => {
   return Array.from(candidates);
 };
 
-// STANDARD N8N RESPONSE (TEXT) — to = rawFrom; dinormalisasi ke chatId private (@c.us) agar tidak pernah kirim ke Status/Story
-const createN8nResponse = (rawFrom, body) => {
+// Response WhatsApp (format untuk whatsappReplyService / WAHA)
+const createWaResponse = (rawFrom, body) => {
   const to = toSafeChatId(rawFrom);
   if (!to) return null;
   return { action: "reply_text", data: { to, body } };
 };
 
-// N8N RESPONSE (LOCATION)
-const createN8nLocationResponse = (rawFrom, lat, long, address, reply) => {
+/** Awalan pesan greeting pertama (tanpa footnote #HUMAN). */
+const FIRST_MESSAGE_GREETING_PREFIX = "Hallo kak, Wa'alaykumsalam";
+const HUMAN_HANDOFF_FOOTNOTE =
+  "\n\n---\n💬 Jika terjadi kendala atau masalah, silahkan ketik #HUMAN jika ingin berbicara langsung dengan admin kami yah kak. 😅🙏";
+
+/** Sisipkan info hand-off di setiap balasan kecuali greeting pertama. */
+function appendHumanHandoffFootnote(body) {
+  if (!body || typeof body !== "string") return body;
+  const t = body.trimStart();
+  if (t.startsWith(FIRST_MESSAGE_GREETING_PREFIX)) return body;
+  if (body.includes("#HUMAN")) return body;
+  return body + HUMAN_HANDOFF_FOOTNOTE;
+}
+
+const createWaLocationResponse = (rawFrom, lat, long, address, reply) => {
   const to = toSafeChatId(rawFrom);
   if (!to) return null;
   return {
@@ -99,39 +123,49 @@ const createN8nLocationResponse = (rawFrom, lat, long, address, reply) => {
   };
 };
 
-// N8N RESPONSE (IMAGE)
-const createN8nImageResponse = (rawFrom, url, caption) => {
-  const to = toSafeChatId(rawFrom);
-  if (!to) return null;
-  return { action: "reply_image", data: { to, url, caption: caption || "" } };
+/**
+ * Helper: ketika dipanggil dari queue (res = null) mengembalikan objek; jika dari HTTP mengirim response.
+ * @param {object|null} res - res Express (null = panggilan dari queue)
+ * @param {object|null} response - payload untuk reply (action + data)
+ * @param {string} [status] - status bila tidak ada response (forwarded_to_admin, ignored_empty, dll.)
+ */
+const out = (res, response, status) => {
+  if (!res) return status != null ? { status } : { response };
+  if (response != null) return res.json(response);
+  return res.status(200).json({ status: status || "no_response_needed" });
 };
 
-/** Jika response n8n null (chatId tidak aman), kembalikan no_response_needed. */
-const replyOrIgnore = (res, n8nPayload) => {
-  if (n8nPayload) return res.json(n8nPayload);
-  return res.status(200).json({ status: "no_response_needed" });
-};
-
-export const handleIncomingMessage = async (req, res) => {
+/**
+ * Logika utama pemrosesan pesan WA. Bisa dipanggil dari HTTP (dengan res) atau dari queue (res = null).
+ * @param {object} data - req.body (format WAHA: { payload: { from, body, ... } })
+ * @param {object} io - Socket.IO instance
+ * @param {object|null} res - Express res (null = return objek hasil untuk queue)
+ */
+export async function processIncomingMessage(data, io, res) {
   try {
-    const data = req.body;
-
     // VALIDASI PAYLOAD
     const payload = data.payload || data;
-    if (!payload || !payload.from) return res.status(200).json({ status: "ignored_empty" });
-    if (payload.fromMe) return res.status(200).json({ status: "ignored_self" });
+    if (!payload || !payload.from) return out(res, null, "ignored_empty");
+    if (payload.fromMe) return out(res, null, "ignored_self");
+
+    const fromForBlocklist =
+      extractCanonicalPhoneFromWaFrom(payload.from) ||
+      String(payload.from || "").replace(/:[\d]+$/, "").replace(/[^0-9]/g, "");
+    if (fromForBlocklist && isBlockedPhone(fromForBlocklist)) {
+      return out(res, null, "ignored_blocklist");
+    }
 
     // FILTER TIPE PESAN (SAFETY GATE)
     const messageType = payload._data?.type || payload.type || "chat";
-    const allowedTypes = ["chat", "location", "image"];
+    const allowedTypes = ["chat", "location", "image", "audio", "ptt", "video", "document"];
 
     if (!allowedTypes.includes(messageType)) {
       console.log(`Ignored unsupported message type: ${messageType}`);
-      return replyOrIgnore(
+      return out(
         res,
-        createN8nResponse(
+        createWaResponse(
           payload.from,
-          "🙏 Maaf, saya saat ini hanya menerima Pesan Teks, Lokasi, dan Foto yang berhubungan dengan order MyJek.",
+          "🙏 Maaf, saya saat ini hanya menerima Pesan Teks, Lokasi, Foto, Voice Note, Video, dan Dokumen yang berhubungan dengan order MyJek.",
         ),
       );
     }
@@ -155,7 +189,7 @@ export const handleIncomingMessage = async (req, res) => {
         address: payload.body || payload._data?.loc,
       };
       messageBody = "SHARE_LOCATION_EVENT";
-    } else if (messageType === "image") {
+    } else if (messageType === "image" || messageType === "video" || messageType === "document") {
       messageBody = payload.caption || "";
       const highResUrl =
         payload.media?.url || payload.mediaUrl || payload._data?.mediaUrl || payload.url;
@@ -166,365 +200,288 @@ export const handleIncomingMessage = async (req, res) => {
       } else {
         mediaData = thumbnailBase64;
       }
+    } else if (messageType === "audio" || messageType === "ptt") {
+      messageBody = "VOICE_NOTE_EVENT";
+    }
+
+    // Payload merged (batch) bisa punya lat/lng meski type chat — agar teks + lokasi tetap diproses
+    if (
+      (payload.lat != null || payload._data?.lat != null) &&
+      (payload.lng != null || payload._data?.lng != null)
+    ) {
+      locationData = {
+        latitude: payload.lat ?? payload._data?.lat,
+        longitude: payload.lng ?? payload._data?.lng,
+        address: payload._data?.loc || "",
+      };
     }
 
     const upperBody = messageBody.toUpperCase().trim();
-    let n8nResponse = null;
+    let waResponse = null;
 
-    // Redis: ambil testMode + cache kurir dalam satu paralel (kurangi latency)
+    const senderPhoneCandidates = buildPhoneCandidates(senderIdClean);
+    let canonicalPhone = extractCanonicalPhoneFromWaFrom(rawSenderId);
+    if (!canonicalPhone && rawSenderId && String(rawSenderId).includes("@lid")) {
+      const resolved = await getPhoneByLid(rawSenderId);
+      if (resolved) canonicalPhone = resolved;
+    }
+    const testModeEnabled =
+      process.env.NODE_ENV !== "production" || process.env.ENABLE_WHATSAPP_TEST_MODE === "true";
     const testModeKey = `test_mode:${senderIdClean}`;
-    const courierCacheKey = `courier_device:${rawSenderId}`;
-    const [testMode, cachedCourierId] = await Promise.all([
-      redisClient.get(testModeKey),
-      redisClient.get(courierCacheKey),
-    ]);
+    const testMode = testModeEnabled ? await redisClient.get(testModeKey) : null;
 
-    // LOGIN KURIR (BISA DIPANGGIL DI PRODUCTION / NON-TEST MODE)
-    if (upperBody.startsWith("#LOGIN")) {
-      const inputPhone = upperBody.replace("#LOGIN", "").trim();
-      const cleanPhone = sanitizePhoneNumber(inputPhone);
-
-      if (!cleanPhone) {
-        return replyOrIgnore(
-          res,
-          createN8nResponse(
-            rawSenderId,
-            "Maaf kak, Format Login salah. Silahkan gunakan/ketik: #LOGIN <Nomor HP> (Contoh: #LOGIN 08912345678)",
-          ),
-        );
-      }
-
-      const courierCandidates = buildPhoneCandidates(cleanPhone);
-      const courierCandidate = await Courier.findOne({
-        where: { phone: { [Op.in]: courierCandidates } },
-        attributes: ["id", "phone", "name", "device_id", "status", "is_active"],
-      });
-
-      if (!courierCandidate) {
-        return replyOrIgnore(
-          res,
-          createN8nResponse(
-            rawSenderId,
-            `Nomor ${inputPhone} tidak terdaftar sebagai kurir. Silahkan hubungi admin.`,
-          ),
-        );
-      }
-
-      const isDifferentDevice =
-        courierCandidate.device_id && courierCandidate.device_id !== rawSenderId;
-      const isCurrentlyOnline = courierCandidate.status && courierCandidate.status !== "OFFLINE";
-
-      if (isDifferentDevice && isCurrentlyOnline) {
-        return replyOrIgnore(
-          res,
-          createN8nResponse(
-            rawSenderId,
-            "Akun kurir ini sudah aktif di perangkat lain. Silahkan hubungi admin jika perlu ganti perangkat.",
-          ),
-        );
-      }
-
-      await courierCandidate.update({
-        device_id: rawSenderId,
-        status: "IDLE",
-        is_active: true,
-      });
-      await redisClient.sAdd("online_couriers", String(courierCandidate.id));
-      await redisClient.setEx(`courier_device:${rawSenderId}`, 300, courierCandidate.id);
-      await redisClient.del(testModeKey);
-      dispatchService.offerPendingOrdersToCourier(courierCandidate).catch((err) =>
-        logger.error("offerPendingOrdersToCourier after #LOGIN:", err)
-      );
-
-      return replyOrIgnore(
+    // Testing dengan 1 nomor (hanya non-production atau bila ENABLE_WHATSAPP_TEST_MODE=true)
+    if (testModeEnabled && upperBody === "#TEST KURIR") {
+      await redisClient.set(testModeKey, "COURIER", { EX: 86400 });
+      return out(
         res,
-        createN8nResponse(
+        createWaResponse(
           rawSenderId,
-          `✅ LOGIN BERHASIL!\nHalo ${courierCandidate.name}, akun kamu sudah aktif nih. Silahkan ditunggu ordernya masuk yah 😃🙏`,
+          "🛠️ MODE TESTING: Anda sekarang bertindak sebagai KURIR. Ketik kode order untuk ambil order, atau #TEST USER untuk bertindak sebagai pelanggan.",
+        ),
+      );
+    }
+    if (testModeEnabled && upperBody === "#TEST USER") {
+      await redisClient.set(testModeKey, "USER", { EX: 86400 });
+      return out(
+        res,
+        createWaResponse(
+          rawSenderId,
+          "🛠️ MODE TESTING: Anda sekarang bertindak sebagai PELANGGAN. Ketik #TEST KURIR untuk bertindak sebagai kurir.",
         ),
       );
     }
 
-    // IDENTIFIKASI PERAN — cache kurir by device (cachedCourierId dari Redis paralel di atas)
-    let courier = null;
-    if (cachedCourierId) {
-      courier = await Courier.findByPk(cachedCourierId, {
-        attributes: ["id", "phone", "name", "device_id", "status", "is_active"],
-      });
-    }
-    if (!courier) {
-      const senderPhoneCandidates = buildPhoneCandidates(senderIdClean);
-      courier = await Courier.findOne({
+    // Satu-satunya aksi kurir di chat: ambil order dengan ketik short_code (skip jika mode USER)
+    if (looksLikeShortCode(messageBody) && testMode !== "USER") {
+      // Selalu cari kurir by device_id dulu (agar 1 nomor @lid/@c.us match kurir yang sama), lalu by phone
+      let courier = await Courier.findOne({
         where: {
           [Op.or]: [
-            { phone: { [Op.in]: senderPhoneCandidates } },
             { device_id: rawSenderId },
+            ...(senderPhoneCandidates.length
+              ? [{ phone: { [Op.in]: senderPhoneCandidates } }]
+              : []),
           ],
         },
         attributes: ["id", "phone", "name", "device_id", "status", "is_active"],
       });
-      if (!courier && rawSenderId?.includes("@lid")) {
-        const rawNotifyName = (payload.pushname || payload._data?.notifyName || "").toString();
-        const cleanedName = rawNotifyName
-          .replace(/\(.*?\)/g, "")
-          .replace(/[^\p{L}\p{N}\s]/gu, " ")
-          .replace(/\s+/g, " ")
-          .trim();
-        if (cleanedName) {
+
+      if (courier) {
+        await courier.update({ device_id: rawSenderId });
+      } else if (testModeEnabled && testMode === "COURIER") {
+        // Hanya daftarkan sebagai kurir jika punya nomor HP asli (62@c.us), bukan LID
+        if (canonicalPhone) {
           courier = await Courier.findOne({
-            where: { name: { [Op.iLike]: cleanedName } },
+            where: { phone: canonicalPhone },
             attributes: ["id", "phone", "name", "device_id", "status", "is_active"],
           });
-          if (!courier) {
-            courier = await Courier.findOne({
-              where: { name: { [Op.iLike]: `%${cleanedName}%` } },
-              attributes: ["id", "phone", "name", "device_id", "status", "is_active"],
+          if (courier) {
+            await courier.update({ device_id: rawSenderId });
+          } else {
+            courier = await Courier.create({
+              name: senderName || "Kurir Test",
+              phone: canonicalPhone,
+              shift_code: 1,
+              status: "IDLE",
+              is_active: true,
+              device_id: rawSenderId,
             });
+            await redisClient.sAdd("online_couriers", String(courier.id));
           }
         }
-        if (courier && courier.device_id !== rawSenderId) {
-          await courier.update({ device_id: rawSenderId });
-        }
       }
-      const wantsOnlineKeyword = /^(#?siap|#?online|online|aktif|kembali)$/i.test(
-        messageBody.trim()
-      );
-      if (!courier && wantsOnlineKeyword) {
-        const phoneCandidates = buildPhoneCandidates(senderIdClean);
-        if (phoneCandidates.length) {
-          courier = await Courier.findOne({
-            where: { phone: { [Op.in]: phoneCandidates } },
-            attributes: ["id", "phone", "name", "device_id", "status", "is_active"],
-          });
-        }
-      }
-    }
-    if (courier) {
-      await redisClient.setEx(courierCacheKey, 300, courier.id); // 5 menit cache
-    }
 
-    const senderPhoneCandidates = buildPhoneCandidates(senderIdClean);
-    let isActingAsCourier = false;
-    if (testMode === "COURIER") {
-      isActingAsCourier = true;
-      if (!courier) {
-        const testUser = await User.findOne({
-          where: { device_id: rawSenderId },
-          attributes: ["phone"],
-        });
-        if (testUser) {
-          const testUserCandidates = buildPhoneCandidates(testUser.phone);
-          courier = await Courier.findOne({
-            where: { phone: { [Op.in]: testUserCandidates } },
-            attributes: ["id", "phone", "name", "device_id", "status", "is_active"],
-          });
-        }
+      if (courier) {
+        const takeResult = await handleCourierTakeByShortCode(courier, messageBody.trim());
+        const resp = takeResult.response;
+        if (resp?.data) resp.data.to = toSafeChatId(rawSenderId) || rawSenderId;
+        return out(res, resp?.data?.to ? resp : null);
       }
-    } else if (testMode === "USER") {
-      isActingAsCourier = false;
-    } else if (courier) {
-      isActingAsCourier = true;
-    }
 
-    // ROUTING FLOW
-    if (isActingAsCourier) {
-      // FLOW KURIR
-      // Cek Mode Test
-      if (upperBody === "#TEST USER") {
-        await redisClient.set(testModeKey, "USER");
-        return replyOrIgnore(res, createN8nResponse(rawSenderId, "🛠️ MODE TESTING: AKTIF SEBAGAI USER."));
-      }
-      if (upperBody === "#TEST KURIR") {
-        await redisClient.set(testModeKey, "COURIER");
-        return replyOrIgnore(
+      if (testModeEnabled && testMode === "COURIER") {
+        return out(
           res,
-          createN8nResponse(rawSenderId, "🛠️ MODE TESTING: ANDA SUDAH DI MODE KURIR."),
-        );
-      }
-
-      // Login Kurir
-      if (upperBody.startsWith("#LOGIN")) {
-        const inputPhone = upperBody.replace("#LOGIN", "").trim();
-        const cleanPhone = sanitizePhoneNumber(inputPhone);
-        if (!cleanPhone)
-          return replyOrIgnore(
-            res,
-            createN8nResponse(
-              rawSenderId,
-              "Maaf kak, Format Login salah. Silahkan gunakan/ketik: #LOGIN <Nomor HP> (Contoh: #LOGIN 08912345678)",
-            ),
-          );
-        const courierCandidate = await Courier.findOne({
-          where: { phone: cleanPhone },
-          attributes: ["id", "phone", "name", "device_id", "status", "is_active"],
-        });
-        if (!courierCandidate)
-          return replyOrIgnore(res, createN8nResponse(rawSenderId, `Nomor ${inputPhone} tidak terdaftar.`));
-
-        await courierCandidate.update({ device_id: rawSenderId, status: "IDLE", is_active: true });
-        await redisClient.sAdd("online_couriers", String(courierCandidate.id));
-        await redisClient.setEx(`courier_device:${rawSenderId}`, 300, courierCandidate.id);
-        await redisClient.del(testModeKey);
-        dispatchService.offerPendingOrdersToCourier(courierCandidate).catch((err) =>
-          logger.error("offerPendingOrdersToCourier after #LOGIN (flow kurir):", err)
-        );
-
-        return replyOrIgnore(
-          res,
-          createN8nResponse(
+          createWaResponse(
             rawSenderId,
-            `✅ LOGIN BERHASIL!\nHalo ${courierCandidate.name}, akun kamu sudah aktif nih. Silahkan ditunggu ordernya masuk yah 😃🙏`,
+            "Nomor ini belum terdaftar sebagai kurir. Tambahkan nomor HP Anda (format 62xxx) di dashboard Mitra Kurir, lalu gunakan nomor yang sama di WhatsApp untuk mengambil order.",
           ),
         );
       }
+    }
 
-      // ChatSession untuk Kurir (intervention / #HUMAN) — butuh user agar FK chat_sessions.phone → users.phone terpenuhi
-      const courierPhoneNorm = sanitizePhoneNumber(courier.phone) || courier.phone;
-      await ensureUserForPhone(courierPhoneNorm, courier.name || "Kurir");
-      let courierSession = await ChatSession.findOne({
-        where: { phone: courierPhoneNorm },
-        attributes: ["phone", "mode", "is_paused_until", "last_interaction"],
+    // Kurir dengan order aktif: struk (gambar), konfirmasi total (ok/ya), #SELESAI — cek SEBELUM pesan generik "mode kurir"
+    const courierWithOrder = await Courier.findOne({
+      where: {
+        [Op.or]: [
+          { device_id: rawSenderId },
+          ...(senderPhoneCandidates.length ? [{ phone: { [Op.in]: senderPhoneCandidates } }] : []),
+        ],
+        current_order_id: { [Op.ne]: null },
+      },
+      attributes: ["id", "name", "phone", "current_order_id"],
+    });
+    if (courierWithOrder?.current_order_id) {
+      const activeOrder = await Order.findOne({
+        where: { order_id: courierWithOrder.current_order_id },
+        include: [{ model: User, as: "user", attributes: ["phone", "name"] }],
       });
-      if (!courierSession) {
-        courierSession = await ChatSession.create({
-          phone: courierPhoneNorm,
-          mode: "BOT",
-          last_interaction: new Date(),
-        });
-      }
-
-      // #HUMAN: beralih ke mode human (tanpa batasan waktu)
-      if (upperBody === "#HUMAN") {
-        await courierSession.update({ mode: "HUMAN", is_paused_until: null, last_interaction: new Date() });
-        await createSystemNotification(req.io, {
-          title: "Kurir meminta Human Mode (#HUMAN)",
-          message: `${courier.name || "Kurir"} (${courier.phone}) meminta beralih ke human mode. Silakan balas dari dashboard.`,
-          type: "HUMAN_HANDOFF",
-          referenceId: courier.phone,
-          actionUrl: "/dashboard/chat",
-          extraData: { userName: courier.name || "Kurir" },
-        });
-        return replyOrIgnore(
-          res,
-          createN8nResponse(
-            rawSenderId,
-            "Sip, percakapan sudah dialihkan ke tim kami. Admin akan segera membalas ya. Terima kasih! 🙏",
-          ),
-        );
-      }
-
-      // Mode HUMAN / Paused → bot diam, forward ke admin
-      const isCourierHumanMode = courierSession.mode === "HUMAN";
-      const courierPausedUntil = courierSession.is_paused_until;
-      const isCourierPaused = courierPausedUntil && new Date(courierPausedUntil) > new Date();
-      if (isCourierHumanMode || isCourierPaused) {
-        await TrainingData.create({
-          user_question: messageBody,
-          admin_answer: null,
-          category: "HUMAN_INTERVENTION",
-          source: `WHATSAPP_COURIER_${courier.phone}`,
-        });
-        if (req.io) {
-          req.io.emit("intervention-message", {
-            phone: courier.phone,
-            user_name: courier.name,
-            text: messageBody,
-            sender: "COURIER",
-            timestamp: new Date(),
-            mode: "HUMAN",
-          });
+      if (activeOrder) {
+        if (
+          messageType === "image" &&
+          ["ON_PROCESS", "BILL_VALIDATION"].includes(activeOrder.status)
+        ) {
+          const imageCount = payload._imageCount ?? (mediaData ? 1 : 0);
+          if (imageCount > 1) {
+            return out(
+              res,
+              createWaResponse(
+                rawSenderId,
+                "Mohon kirim *1 gambar struk saja* per order. Jika kamu mengirim lebih dari satu foto, silakan kirim ulang satu foto struk saja ya."
+              )
+            );
+          }
+          if (mediaData) {
+            const replyText = await handleCourierStrukImage(courierWithOrder, activeOrder, mediaData);
+            if (replyText) {
+              return out(res, createWaResponse(rawSenderId, replyText));
+            }
+          }
         }
-        return res.status(200).json({ status: "forwarded_to_admin" });
+        if (messageType === "chat") {
+          const lowerBody = (messageBody || "").toLowerCase().trim();
+          const isConfirm =
+            /^(ok|oke|ya|iya|sip|siap|y|yes|gas|lanjut|setuju|boleh)$/i.test(lowerBody) ||
+            /^(ok|oke|ya|iya|sip|siap)(\s|,|\.|!)*$/i.test(lowerBody);
+          if (activeOrder.status === "BILL_VALIDATION") {
+            if (isConfirm) {
+              const replyText = await handleCourierConfirmBill(courierWithOrder, activeOrder);
+              if (replyText) {
+                return out(res, createWaResponse(rawSenderId, replyText));
+              }
+            } else {
+              const replyText = await handleCourierReviseBill(
+                courierWithOrder,
+                activeOrder,
+                (messageBody || "").trim()
+              );
+              if (replyText) {
+                return out(res, createWaResponse(rawSenderId, replyText));
+              }
+              return out(
+                res,
+                createWaResponse(
+                  rawSenderId,
+                  "Ketik *OK* atau *Ya* untuk konfirmasi total, atau ketik *angka* untuk revisi (contoh: 81000)."
+                )
+              );
+            }
+          }
+          if (activeOrder.status === "BILL_SENT" && upperBody === "#SELESAI") {
+            const replyText = await handleCourierSelesai(courierWithOrder, activeOrder);
+            if (replyText) {
+              return out(res, createWaResponse(rawSenderId, replyText));
+            }
+          }
+        }
       }
+    }
 
-      if (courierSession.is_paused_until && new Date(courierSession.is_paused_until) <= new Date()) {
-        await courierSession.update({ is_paused_until: null, mode: "BOT" });
-      }
-
-      // Handle Pesan Kurir
-      const courierReply = await handleCourierMessage(
-        courier,
-        messageBody,
-        mediaData,
-        rawSenderId,
-        mediaData,
-        locationData,
-        req.io,
+    // Mode kurir tapi pesan bukan short_code dan bukan aksi order (struk/ok/#SELESAI) → panduan
+    if (testModeEnabled && testMode === "COURIER") {
+      return out(
+        res,
+        createWaResponse(
+          rawSenderId,
+          "Anda dalam mode kurir. Ketik *kode order* (contoh: AB12) untuk ambil order, atau #TEST USER untuk bertindak sebagai pelanggan.",
+        ),
       );
+    }
 
-      // Routing Response Kurir
-      if (courierReply?.action === "trigger_n8n_image") {
-        n8nResponse = createN8nImageResponse(
-          rawSenderId,
-          courierReply.data.url,
-          courierReply.data.caption,
-        );
-      } else if (courierReply?.type === "location") {
-        n8nResponse = createN8nLocationResponse(
-          rawSenderId,
-          courierReply.latitude,
-          courierReply.longitude,
-          courierReply.address,
-          courierReply.reply,
-        );
-      } else if (courierReply?.reply) {
-        n8nResponse = createN8nResponse(rawSenderId, courierReply.reply);
-      }
-    } else {
-      // FLOW USER
-
-      if (upperBody === "#TEST KURIR") {
-        await redisClient.set(testModeKey, "COURIER");
-        return replyOrIgnore(res, createN8nResponse(rawSenderId, "🛠️ MODE TESTING: KEMBALI SEBAGAI KURIR."));
-      }
-
-      // Identifikasi User & Registrasi (hanya kolom yang dipakai untuk routing + nama)
-      let existingUser = await User.findOne({
+    // Kurir kirim lokasi (Share Location WA) → update posisi & tampilkan di Live Map
+    const hasLocation = locationData && locationData.latitude != null && locationData.longitude != null;
+    if (hasLocation) {
+      const courierByLocation = await Courier.findOne({
         where: {
           [Op.or]: [
             { phone: { [Op.in]: senderPhoneCandidates } },
             { device_id: rawSenderId },
           ],
         },
-        attributes: ["phone", "name", "device_id"],
+        attributes: ["id", "name", "phone", "current_latitude", "current_longitude", "status"],
       });
-
-      // Pelanggan baru: wajib kirim nomor HP dulu. Jika belum terdaftar dan pesan bukan nomor HP valid, langsung balas minta registrasi.
-      if (!existingUser) {
-        const phoneFromMessage = sanitizePhoneNumber(messageBody);
-        if (!phoneFromMessage) {
-          return replyOrIgnore(
+      if (courierByLocation) {
+        const lat = parseFloat(locationData.latitude);
+        const lng = parseFloat(locationData.longitude);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          await courierByLocation.update({
+            current_latitude: lat,
+            current_longitude: lng,
+            last_active_at: new Date(),
+          });
+          if (io) {
+            io.emit("courier-location-update", {
+              id: courierByLocation.id,
+              name: courierByLocation.name,
+              phone: courierByLocation.phone,
+              lat,
+              lng,
+              status: courierByLocation.status,
+              updatedAt: new Date(),
+            });
+          }
+          return out(
             res,
-            createN8nResponse(
+            createWaResponse(
               rawSenderId,
-              `👋 Halo Kak! Selamat datang di MyJek, aplikasi pesan - antar online 😃.\n\nKarena ini pertama kali chat, mohon kirim nomor HP dulu ya.\nContohnya ketik: 08123456789`,
+              "✅ Lokasi berhasil diperbarui. Posisi kamu sekarang terpantau di peta base camp.",
             ),
           );
         }
       }
+    }
 
-      if (!existingUser && sanitizePhoneNumber(messageBody)) {
-        const phoneInput = sanitizePhoneNumber(messageBody);
-        existingUser = await User.findOne({
-          where: { phone: phoneInput },
-          attributes: ["phone", "name", "device_id"],
-        });
-        if (!existingUser) {
-          await User.create({ name: senderName, phone: phoneInput, device_id: rawSenderId });
-          n8nResponse = createN8nResponse(
+    // Pastikan kolom phone hanya berisi nomor HP (62@c.us). Cari by device_id dulu agar 1 orang (lid + c.us) satu record.
+    let existingUser = await User.findOne({
+      where: { device_id: rawSenderId },
+      attributes: ["phone", "name", "device_id"],
+    });
+    if (!existingUser && canonicalPhone) {
+      existingUser = await User.findOne({
+        where: { phone: canonicalPhone },
+        attributes: ["phone", "name", "device_id"],
+      });
+    }
+
+    if (!existingUser) {
+      if (!canonicalPhone) {
+        return out(
+          res,
+          createWaResponse(
             rawSenderId,
-            `✅ Registrasi berhasil!\nSalam kenal Kak ${senderName}. Selamat datang di MyJek. Mau pesan apa hari ini? 😃🙏`,
-          );
-        } else {
-          await existingUser.update({ device_id: rawSenderId });
-          n8nResponse = createN8nResponse(
-            rawSenderId,
-            `✅ Akun terhubung kembali. Mau pesan apa hari ini kak? 😃🙏`,
-          );
-        }
-      } else {
-        if (existingUser) {
-          // LOGIC INTERVENTION & HANDOFF
+            "Untuk mencatat pemesanan, nomor HP Anda harus terdeteksi. Pastikan menggunakan nomor WhatsApp dengan format 62xxx (contoh: 6281234567890). 🙏",
+          ),
+        );
+      }
+      existingUser = await User.create({
+        phone: canonicalPhone,
+        name: senderName || "Pelanggan",
+        device_id: rawSenderId,
+      });
+    } else {
+      const updates = { device_id: rawSenderId };
+      if (canonicalPhone && existingUser.phone !== canonicalPhone) updates.phone = canonicalPhone;
+      if (senderName && senderName !== existingUser.name) updates.name = senderName;
+      await existingUser.update(updates);
+    }
+
+    const replyTo =
+      existingUser && String(existingUser.phone || "").trim().startsWith("62")
+        ? existingUser.phone
+        : rawSenderId;
+
+    {
+      // LOGIC INTERVENTION & HANDOFF
 
           // Ambil / Buat Sesi Chat (kolom minimal untuk cek mode & pause)
           let session = await ChatSession.findOne({
@@ -539,22 +496,24 @@ export const handleIncomingMessage = async (req, res) => {
             });
           }
 
-          // #HUMAN: beralih ke mode human (tanpa batasan waktu)
+          // #HUMAN: beralih ke mode human (tanpa batasan waktu; auto-revert setelah 5 jam)
           if (upperBody === "#HUMAN") {
-            await session.update({ mode: "HUMAN", is_paused_until: null, last_interaction: new Date() });
-            await createSystemNotification(req.io, {
-              title: "Pelanggan meminta Human Mode (#HUMAN)",
-              message: `${existingUser.name || "Pelanggan"} (${existingUser.phone}) meminta beralih ke human mode. Silakan balas dari dashboard.`,
+            await session.update({ mode: "HUMAN", is_paused_until: null, last_interaction: new Date(), human_since: new Date() });
+            await createSystemNotification(io, {
+              title: "Pelanggan minta bantuan",
+              message: `${existingUser.name || "Pelanggan"} (${existingUser.phone}) — silakan balas dari dashboard.`,
               type: "HUMAN_HANDOFF",
               referenceId: existingUser.phone,
               actionUrl: "/dashboard/chat",
               extraData: { userName: existingUser.name || "Pelanggan" },
             });
-            return replyOrIgnore(
+            return out(
               res,
-              createN8nResponse(
-                rawSenderId,
-                "Sip kak, percakapan sudah dialihkan ke tim kami. Admin akan segera membalas pesan kakak ya. Terima kasih! 🙏",
+              createWaResponse(
+                replyTo,
+                appendHumanHandoffFootnote(
+                  "Sip kak, percakapan sudah dialihkan ke tim kami. Admin akan segera membalas pesan kakak ya. Terima kasih! 🙏",
+                ),
               ),
             );
           }
@@ -575,20 +534,24 @@ export const handleIncomingMessage = async (req, res) => {
               source: "WHATSAPP_USER",
             });
 
-            // Emit Socket (Pesan User)
-            if (req.io) {
-              req.io.emit("intervention-message", {
-                phone: existingUser.phone,
-                user_name: existingUser.name,
-                text: messageBody,
-                sender: "USER",
-                timestamp: new Date(),
-                mode: "HUMAN", // Kirim status HUMAN
-              });
-            }
+          // Emit Socket (Pesan User)
+          if (io) {
+            io.emit("intervention-message", {
+              phone: existingUser.phone,
+              user_name: existingUser.name,
+              text: messageBody,
+              type: messageType,
+              media_url: mediaData,
+              latitude: locationData?.latitude,
+              longitude: locationData?.longitude,
+              sender: "USER",
+              timestamp: new Date(),
+              mode: "HUMAN", // Kirim status HUMAN
+            });
+          }
 
             // Stop Bot (Return response kosong agar Bot tidak membalas)
-            return res.status(200).json({ status: "forwarded_to_admin" });
+            return out(res, null, "forwarded_to_admin");
           }
 
           // MODE BOT (AI BEKERJA)
@@ -597,23 +560,29 @@ export const handleIncomingMessage = async (req, res) => {
             await session.update({ is_paused_until: null, mode: "BOT" });
           }
 
-          // Jalankan AI Service
+          // Jalankan AI Service (tanpa lokasi/koordinat)
+          const orderChatBodies = payload._orderChatBodies || (messageBody ? [messageBody] : []);
           const userReply = await handleUserMessage(
             existingUser.phone,
             existingUser.name,
             messageBody,
             rawSenderId,
-            locationData,
-            req.io,
+            null,
+            io,
+            { orderChatBodies },
           );
 
           // Emit Socket (Monitoring Dashboard)
-          if (req.io) {
+          if (io) {
             // Pesan User
-            req.io.emit("intervention-message", {
+            io.emit("intervention-message", {
               phone: existingUser.phone,
               user_name: existingUser.name,
               text: messageBody,
+              type: messageType,
+              media_url: mediaData,
+              latitude: locationData?.latitude,
+              longitude: locationData?.longitude,
               sender: "USER",
               timestamp: new Date(),
               mode: "BOT",
@@ -621,10 +590,11 @@ export const handleIncomingMessage = async (req, res) => {
 
             // Balasan Bot
             if (userReply?.reply) {
-              req.io.emit("intervention-message", {
+              io.emit("intervention-message", {
                 phone: existingUser.phone,
                 user_name: existingUser.name,
                 text: userReply.reply,
+                type: "chat",
                 sender: "BOT",
                 timestamp: new Date(),
                 mode: "BOT",
@@ -632,102 +602,154 @@ export const handleIncomingMessage = async (req, res) => {
             }
           }
 
-          // Format Response ke N8N
+          // Format response WhatsApp
           if (userReply?.action === "handoff") {
-            const pauseDuration = 30 * 60 * 1000;
-            const pauseUntil = new Date(Date.now() + pauseDuration);
-            await session.update({ mode: "HUMAN", is_paused_until: pauseUntil });
+            const fiveHoursMs = 5 * 60 * 60 * 1000;
+            const pauseUntil = new Date(Date.now() + fiveHoursMs);
+            await session.update({ mode: "HUMAN", is_paused_until: pauseUntil, human_since: new Date() });
 
-            await createSystemNotification(req.io, {
-              title: "SYSTEM HANDOFF: Bot Dialihkan ke HUMAN",
-              message: `Bot mengalami kendala pada percakapan user ${existingUser.phone}. Mode dialihkan ke HUMAN selama 30 menit.`,
+            await createSystemNotification(io, {
+              title: "Bot dialihkan ke Human",
+              message: `${existingUser.name || "Pelanggan"} (${existingUser.phone}) — silakan balas dari dashboard.`,
               type: "HUMAN_HANDOFF",
               referenceId: existingUser.phone,
-              actionUrl: `/dashboard/chat`,
+              actionUrl: "/dashboard/chat",
               extraData: { userName: existingUser.name || "User" },
             });
 
-            n8nResponse = createN8nResponse(rawSenderId, userReply.reply);
+            waResponse = createWaResponse(
+              replyTo,
+              appendHumanHandoffFootnote(userReply.reply),
+            );
           } else if (userReply?.type === "location") {
-            n8nResponse = createN8nLocationResponse(
-              rawSenderId,
+            waResponse = createWaLocationResponse(
+              replyTo,
               userReply.latitude,
               userReply.longitude,
               userReply.address,
               userReply.reply || "",
             );
           } else if (userReply?.reply) {
-            n8nResponse = createN8nResponse(rawSenderId, userReply.reply);
+            waResponse = createWaResponse(
+                replyTo,
+                appendHumanHandoffFootnote(userReply.reply),
+              );
           } else if (userReply?.action) {
-            n8nResponse = userReply;
+            waResponse = userReply;
+            if (waResponse?.data) waResponse.data.to = replyTo;
+            if (waResponse?.data?.body) {
+              waResponse.data.body = appendHumanHandoffFootnote(waResponse.data.body);
+            }
           }
-        } else {
-          // User Belum Terdaftar
-          n8nResponse = createN8nResponse(
-            rawSenderId,
-            `👋 Halo Kak! Selamat datang di MyJek, aplikasi pesan - antar online 😃. \n\nKarena ini pertama kali chat, mohon kirim nomor HP dulu ya.\nContohnya ketik: 08123456789`,
-          );
-        }
-      }
     }
 
-    if (n8nResponse) return res.json(n8nResponse);
-    return res.status(200).json({ status: "no_response_needed" });
+    if (waResponse) return out(res, waResponse);
+    return out(res, null, "no_response_needed");
   } catch (error) {
     logger.error(`Error Processing Webhook: ${error.message}`);
 
-    // AUTOMATIC HANDOFF SAAT ERROR
+    // AUTOMATIC HANDOFF SAAT ERROR — pakai nomor HP kanonik (62xxx) untuk session & notifikasi
+    const rawId = data?.payload?.from || data?.payload?.chatId || "";
     try {
-      // Identifikasi Nomor HP dari body request (bisa user atau kurir)
-      const rawId = req.body?.payload?.from || req.body?.payload?.chatId || "";
-      const phone = sanitizePhoneNumber(sanitizeId(rawId));
-
-      if (phone) {
-        // ChatSession butuh FK ke users: pastikan ada record users untuk nomor ini (buat minimal jika belum)
-        const courierByPhone = await Courier.findOne({ where: { phone } });
-        const displayName = courierByPhone?.name || "User";
-        const user = await ensureUserForPhone(phone, displayName);
-
-        let session = await ChatSession.findOne({ where: { phone } });
-        if (!session) {
-          session = await ChatSession.create({
-            phone,
-            mode: "BOT",
-            last_interaction: new Date(),
-          });
+      if (rawId) {
+        let canonicalPhone = null;
+        let existingUser = await User.findOne({
+          where: { device_id: rawId },
+          attributes: ["phone", "name", "device_id"],
+        });
+        if (existingUser && String(existingUser.phone || "").trim().startsWith("62")) {
+          canonicalPhone = existingUser.phone;
         }
+        if (!canonicalPhone) {
+          canonicalPhone = await getPhoneByLid(rawId);
+        }
+        const fallbackPhone = sanitizePhoneNumber(sanitizeId(rawId));
+        const phone = canonicalPhone || fallbackPhone;
 
-        const pauseDuration = 30 * 60 * 1000;
-        const pauseUntil = new Date(Date.now() + pauseDuration);
-        await session.update({
-          mode: "HUMAN",
-          is_paused_until: pauseUntil,
-        });
+        if (phone) {
+          const courierByPhone = await Courier.findOne({ where: { phone } });
+          const displayName = courierByPhone?.name || existingUser?.name || "User";
+          const user = await ensureUserForPhone(phone, displayName);
+          await user.update({ device_id: rawId }).catch(() => {});
 
-        await createSystemNotification(req.io, {
-          title: "SYSTEM CRASH: Bot Gagal Memproses Pesan!",
-          message: `Terjadi error kritis pada Bot: "${error.message}". Mode otomatis dialihkan ke HUMAN untuk ${displayName} (${phone}). Segera lakukan tindakan atau chat untuk dibantu!`,
-          type: "HUMAN_HANDOFF",
-          referenceId: phone,
-          actionUrl: `/dashboard/chat`,
-          extraData: { userName: user.name || displayName },
-        });
+          let session = await ChatSession.findOne({ where: { phone } });
+          if (!session) {
+            session = await ChatSession.create({
+              phone,
+              mode: "BOT",
+              last_interaction: new Date(),
+            });
+          }
 
-        logger.info(`Emergency Handoff triggered for ${phone}`);
+          const fiveHoursMs = 5 * 60 * 60 * 1000;
+          const pauseUntil = new Date(Date.now() + fiveHoursMs);
+          await session.update({
+            mode: "HUMAN",
+            is_paused_until: pauseUntil,
+            human_since: new Date(),
+          });
+
+          await createSystemNotification(io, {
+            title: "Bot bermasalah, mode Human",
+            message: `${user.name || displayName} (${phone}) — silakan balas dari dashboard.`,
+            type: "HUMAN_HANDOFF",
+            referenceId: phone,
+            actionUrl: "/dashboard/chat",
+            extraData: { userName: user.name || displayName },
+          });
+
+          logger.info(`Emergency Handoff triggered for ${phone}`);
+        }
       }
     } catch (innerError) {
       console.error("Gagal menjalankan Safety Net:", innerError);
     }
-    const rawId = req.body?.payload?.from || req.body?.payload?.chatId || "";
     if (rawId) {
-      return replyOrIgnore(
+      return out(
         res,
-        createN8nResponse(
+        createWaResponse(
           rawId,
-          "Maaf kak, sistem kami sedang mengalami kendala. Percakapan ini kami alihkan ke admin (mode HUMAN) selama 30 menit ya. Mohon tunggu sebentar 🙏",
+          appendHumanHandoffFootnote(
+            "Maaf kak, sistem kami sedang mengalami kendala. Percakapan ini kami alihkan ke admin (mode HUMAN) selama 5 jam ya. Mohon tunggu sebentar 🙏",
+          ),
         ),
       );
     }
-    return res.status(200).json({ status: "error", message: "Error handled gracefully" });
+    return out(res, null, "error");
   }
-};
+}
+
+/**
+ * Handler HTTP webhook WAHA: enqueue pesan lalu return 200 (balasan dikirim oleh scheduler via WAHA).
+ */
+export async function handleIncomingMessage(req, res) {
+  const data = req.body || {};
+  const event = data.event;
+  const payload = data.payload || data;
+  const from = payload?.from || payload?.id;
+
+  if (!from) {
+    return res.status(200).json({ status: "ignored_empty" });
+  }
+  
+  // Handle presence updates (typing status) — WAHA: payload.id = chatId, presences[].lastKnownPresence atau payload.presence
+  if (event === "presence.update") {
+    const chatId = payload?.id || payload?.from || from;
+    const presences = payload?.presences || [];
+    const contactPresence =
+      presences.find((p) => p.participant && String(p.participant).includes("@c.us")) || presences[0];
+    let lastKnown = (contactPresence?.lastKnownPresence ?? payload?.lastKnownPresence ?? payload?.presence ?? "").toString().toLowerCase();
+    if (!lastKnown && presences.length > 0) lastKnown = (presences[0].lastKnownPresence ?? "").toString().toLowerCase();
+    const isTyping = lastKnown === "typing" || lastKnown === "recording";
+    await enqueuePresence(chatId, isTyping);
+    logger.info(`presence.update chat=${chatId} lastKnownPresence=${lastKnown} isTyping=${isTyping}`);
+    return res.status(200).json({ status: "presence_updated", isTyping });
+  }
+
+  if (payload.fromMe) {
+    return res.status(200).json({ status: "ignored_self" });
+  }
+
+  const { ok, queued } = await enqueue(from, data);
+  return res.status(200).json({ status: ok && queued ? "queued" : "error", queued: !!queued });
+}

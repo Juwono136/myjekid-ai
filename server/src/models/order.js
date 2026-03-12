@@ -16,27 +16,22 @@ const Order = sequelize.define(
     user_phone: { type: DataTypes.STRING(20), allowNull: false },
     courier_id: { type: DataTypes.UUID, allowNull: true },
 
-    raw_message: DataTypes.TEXT,
-    items_summary: DataTypes.JSONB,
-    order_notes: {
+    chat_messages: {
       type: DataTypes.JSONB,
       defaultValue: [],
+      comment: "Seluruh pesan chat pelanggan yang di-forward ke kurir",
     },
 
     invoice_image_url: DataTypes.TEXT,
     total_amount: {
-      type: DataTypes.DECIMAL(12, 0), // Menyimpan angka presisi uang
+      type: DataTypes.DECIMAL(12, 0),
       defaultValue: 0,
     },
-
-    pickup_address: {
-      type: DataTypes.TEXT,
-      allowNull: true, // Boleh kosong jika bukan food delivery
+    /** Total dari baca struk (OCR); jika kurir revisi, total_amount bisa berbeda. */
+    receipt_total: {
+      type: DataTypes.DECIMAL(12, 0),
+      allowNull: true,
     },
-    pickup_latitude: { type: DataTypes.DOUBLE, allowNull: true },
-    pickup_longitude: { type: DataTypes.DOUBLE, allowNull: true },
-
-    delivery_address: DataTypes.TEXT,
 
     status: {
       type: DataTypes.ENUM(
@@ -52,11 +47,12 @@ const Order = sequelize.define(
       defaultValue: "DRAFT",
     },
     completed_at: DataTypes.DATE,
+    taken_at: { type: DataTypes.DATE, allowNull: true },
 
     offered_courier_ids: {
       type: DataTypes.JSONB,
       defaultValue: [],
-      comment: "Daftar courier id yang sudah ditawari order (untuk timeout 3 menit per kurir)",
+      comment: "Daftar courier id yang sudah ditawari order",
     },
     last_offered_at: { type: DataTypes.DATE, allowNull: true },
   },
@@ -64,11 +60,19 @@ const Order = sequelize.define(
     timestamps: true,
     createdAt: "created_at",
     updatedAt: "updated_at",
+    getterMethods: {
+      items_summary() { return []; },
+      pickup_address() { return ""; },
+      delivery_address() { return ""; },
+      order_notes() { return []; },
+      raw_message() { return (this.chat_messages && this.chat_messages[0]) ? String(this.chat_messages[0]) : ""; },
+    },
     indexes: [
       { fields: ["status"] },
       { fields: ["status", "created_at"] },
       { fields: ["user_phone"] },
       { fields: ["user_phone", "status"] },
+      { fields: ["courier_id"] },
     ],
   }
 );

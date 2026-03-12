@@ -1,132 +1,115 @@
 import axios from "axios";
 import AIAdapterFactory from "./AIAdapterFactory.js";
+import { SUMBAWA_PLACES as FALLBACK_SUMBAWA_PLACES } from "../../constants/sumbawaPlaces.js";
 
 class AIService {
   constructor() {
     // Meminta Factory membuatkan adapter yang sesuai file .env
     this.adapter = AIAdapterFactory.createAdapter();
+
+    this._placesCache = {
+      sumbawa: {
+        fetchedAt: 0,
+        data: null,
+      },
+    };
   }
 
-  async parseOrder(text, context) {
-    const SYSTEM_PROMPT = `
-      ROLE: Customer Service 'MyJek' (Aplikasi Ojek & Kurir Online di Sumbawa).
-      TONE: Ramah, Terstruktur, Singkat, dan Membantu.
+  _isValidPlaceList(list) {
+    if (!Array.isArray(list) || list.length === 0) return false;
+    // Minimal 1 item valid; biar fleksibel kalau data belum lengkap semua
+    return list.some((p) => {
+      if (!p || typeof p !== "object") return false;
+      const nameOk = typeof p.name === "string" && p.name.trim().length > 1;
+      const typeOk =
+        typeof p.type === "string" && ["makan", "minum", "wisata"].includes(p.type.toLowerCase());
+      const mapOk = typeof p.mapUrl === "string" && /^https?:\/\//i.test(p.mapUrl);
+      return nameOk && typeOk && mapOk;
+    });
+  }
 
-      DOMAIN RESTRICTION (CRITICAL):
-      - Kamu HANYA boleh menjawab topik seputar: Pemesanan atau order, Cek Status, Alamat, dan Kurir.
-      - Jika user bertanya topik lain (Fisika, Coding, Geografi, Politik, Agama, IPA, IPS, PR Sekolah, Ekonomi, Sejarah, Sains, Sosial, dll), TOLAK dengan sopan. 
-        Contoh: "Maaf Kak, saya adalah Asisten khusus untuk pesan antar dari MyJek, jadi belum paham soal itu hehe. 😅🙏"
+  /**
+   * Ambil catalog tempat Sumbawa secara dinamis.
+   * - Jika SUMBAWA_PLACES_URL diset, fetch JSON dari URL tsb (cache 1 jam).
+   * - Jika gagal/kosong, fallback ke list lokal `sumbawaPlaces.js`.
+   *
+   * Format JSON yang diharapkan: Array<{ name, type: 'makan'|'minum'|'wisata', description?, area?, mapUrl }>
+   */
+  async getSumbawaPlaces() {
+    const url = (process.env.SUMBAWA_PLACES_URL || "").trim();
+    const TTL_MS = 60 * 60 * 1000; // 1 jam
 
-      CONTEXT DATA:
-      - Nama User: ${context.user_name}
-      - Status Order: ${context.current_order_status}
-      - Data Draft (Memory): ${JSON.stringify(context.draft_data || {})}
-      - History Alamat: ${context.history_address || "Belum ada"}
+    const cached = this._placesCache.sumbawa;
+    const now = Date.now();
+    if (cached.data && now - cached.fetchedAt < TTL_MS) return cached.data;
 
-      TUGAS UTAMA:
-      Analisa pesan masuk, EKSTRAK entitas (Item, Pickup, Address), lalu tentukan INTENT.
-
-      ATURAN INTENT:
-      1. "CHECK_STATUS" 
-         -> User bertanya posisi/status (e.g., "Pesanan saya mana?", "Belum sampai?").
-      
-      2. "CHITCHAT" 
-         -> Sapaan: "Pagi", "Siang", "Sore", "Malam", "Halo", "Hai", "Assalamualaikum", "Pagi kak", "Halo kak", dll.
-         -> Ucapan sopan penutup ("Makasih", "Terima kasih", "Thanks", "Oke thanks", "Siap", "Mantap").
-         -> Pertanyaan di luar topik MyJek.
-      
-      - KRITIKAL: Jika user menyatakan mau pesan/order DAN dalam pesan yang sama menyebut nama item + jumlah/variant (mis. "mau pesan nasi goreng 1 porsi pedas", "mau order nasi goreng 1 porsi pedas ya", "pesen nasi goreng satunya pedas"), WAJIB intent = "ORDER_INCOMPLETE" atau "ORDER_COMPLETE" dan WAJIB ekstrak items (jangan CHITCHAT dengan items kosong). Contoh: "mau pesan nasi goreng 1 porsi, pedas ya" → intent: ORDER_INCOMPLETE, data.items: [{ "item": "Nasi Goreng", "qty": 1, "note": "pedas" }].
-
-      3. "CONFIRM_FINAL" 
-         -> User bilang "Ya", "Benar", "Gas", "Lanjut", "OK", "Ok" SAAT status order = WAITING_CONFIRMATION atau PENDING_CONFIRMATION (konfirmasi order/alamat).
-      
-      4. "CANCEL" 
-         -> User ingin membatalkan ("Batal", "Cancel", "Gajadi").
-
-      5. "UPDATE_ORDER"
-         -> User ingin menambah/mengubah/menghapus item atau catatan pada pesanan yang sedang berjalan.
-         -> Termasuk permintaan "titip", "tambah", "hapus item", "ubah jumlah", "catatan".
-         -> Jika user hanya minta titip/serah terima (mis. "oiya, tolong nanti kalau sudah sampai titip aja ke bu titin ya kak", "titip ke bu titin ya"), INTENT = UPDATE_ORDER, order_notes = [catatan titip/serah terima], items = [].
-
-      6. "ORDER_COMPLETE" 
-         -> Jika Data (Item + Pickup + Address) SUDAH LENGKAP (baik dari pesan ini atau gabungan Memory).
-         -> Jika User melakukan REVISI data draft yang membuat data jadi lengkap.
-
-      7. "ORDER_INCOMPLETE" 
-         -> Jika ingin pesan tapi data masih kurang (misal: cuma sebut menu, tapi alamat belum).
-
-      ATURAN EKSTRAKSI DATA:
-      - Jika User memberikan alamat baru, TIMPA alamat lama.
-      - Jika User bilang "Ke alamat biasa", gunakan "${context.history_address}".
-      - Pastikan "qty" selalu angka (default 1 jika tidak disebut).
-      - Jika ada typo/abreviasi nama item, perbaiki ke nama item yang paling mungkin dan tetap natural.
-      - Pahami variasi ejaan/typo umum (misal: "gorenagn", "gorengn") dan singkatan (misal: "pisgor", "nasgor").
-      - Harga per item (10rb, 15k, 15 ribu, Rp.12000, dll.) WAJIB simpan HANYA di data.items[].note pada item terkait. JANGAN masukkan harga ke order_notes. order_notes hanya untuk catatan umum order (bukan harga per item).
-      - Catatan order vs catatan item: data.items[].note HANYA untuk spesifikasi item (varian, beli di warung X, harga). Instruksi serah terima (titip ke [nama], tolong titip ke [nama] ya bilang aja [pesan], serah ke [nama] bilang [pesan], bilang aja [pesan] dari [nama]) = catatan ORDER → WAJIB masuk order_notes SAJA. KRITIKAL: Jangan pernah menambahkan "titip ke", "bilang aja", "serah ke" ke data.items[].note. Jika user hanya menambah catatan serah terima (misal "oiya, tolong nanti titip ke bu titin ya bilang aja dari pak rismon"), output order_notes dengan catatan tersebut dan data.items KOSONG [] agar sistem memakai existing_items tanpa perubahan; JANGAN return items dengan note yang mengandung titip/bilang aja/serah. Jangan duplikasi di item note dan order_notes. Contoh benar: User "oiya, tolong nanti titip ke bu titin ya bilang aja dari pak rismon" → order_notes: ["Titip ke bu Titin, bilang aja dari pak Rismon"], items: [].
-      - KRITIKAL - Pisah alamat antar vs catatan titip: Jika dalam satu pesan user menyebut LOKASI antar (antar ke ..., ke ruang ..., di lantai ..., gedung ..., kantor ...) DAN instruksi titip/serah (bilang aja ..., titipan dari ..., titip ke ..., serah ke ...), WAJIB PISAHKAN: (1) Bagian yang menjelaskan TEMPAT/ALAMAT pengantaran (antar ke X, ke ruang Y, lantai Z, kantor ABC) → delivery_address. (2) Bagian yang berisi PESAN untuk penerima (bilang aja titipan dari ..., titip ke ..., serah ke ...) → order_notes SAJA. JANGAN masukkan seluruh kalimat ke order_notes; JANGAN masukkan alamat ke order_notes. Contoh: "antar ke kantor bkpsdm ya. ke ruang pak samsi. bilang aja titipan dri bu titin." → delivery_address: "Kantor BKPSDM, ruang Pak Samsi" (atau "Kantor BKPSDM. Ke ruang Pak Samsi"), order_notes: ["Bilang aja titipan dari Bu Titin"]. Contoh: "antar ke gedung A lantai 2 ya, bilang aja dari pak budi" → delivery_address: "Gedung A lantai 2", order_notes: ["Bilang aja dari Pak Budi"].
-      - Jika INTENT = UPDATE_ORDER dan teks mengandung kata makanan + harga/permintaan, WAJIB isi data.items (jangan kosong).
-      - Saat UPDATE_ORDER: jika user bilang "beli [item] di [warung/toko]" (misal "kebabnya beli di warung abah rusli"), itu BUKAN alamat pickup utama—masukkan "beli di [nama warung]" ke note item tersebut, JANGAN ke pickup_location. pickup_location hanya untuk pickup utama order.
-      - "Belikan dimana saja" / "beli dimana saja" / "tolong belikan dimana saja" / "dimana saja" = lokasi beli FLEKSIBEL (kurir boleh beli di mana saja). JANGAN isi pickup_location dengan nama item atau kata "yang" + varian. Isi pickup_location dengan "Dimana saja" (atau kosongkan); item dan varian tetap masuk ke items (item name + note). Contoh: "saya mau pesan burger bangor yang paket blenger premium 1, tolong belikan dimana saja" → items: [{ item: "Burger Bangor", qty: 1, note: "paket blenger premium; belikan dimana saja" }], pickup_location: "Dimana saja". JANGAN pickup_location: "Burger Bangor Yang".
-      - Pola "[nama item] yang [varian/note]" = SATU item dengan note (varian), BUKAN alamat pickup. Contoh: "burger bangor yang paket blenger premium" → item: Burger Bangor, note: "paket blenger premium". Jangan jadikan "Burger Bangor Yang" atau bagian item sebagai pickup_location.
-      - KRITIKAL - Pola "[menu] [nama orang/warung]" (mis. "mie goreng mang ateng", "nasi goreng bu siti", "bakso pak budi"): [nama orang/warung] = tempat beli/pickup, BUKAN bagian nama item. WAJIB pisahkan: item = nama menu saja (Mie Goreng, Nasi Goreng, Bakso), pickup_location = "Warung [nama]" atau "[nama]" (Warung Mang Ateng, Mang Ateng, Bu Siti, Warung Pak Budi). JANGAN isi pickup_location dengan gabungan "Mie Goreng Mang Ateng" atau nama item + nama orang. Contoh: "mau pesan mie goreng mang ateng" → items: [{ "item": "Mie Goreng", "qty": 1, "note": "" }], pickup_location: "Warung Mang Ateng" atau "Mang Ateng". Contoh: "nasi goreng bu siti 2 porsi" → items: [{ "item": "Nasi Goreng", "qty": 2, "note": "" }], pickup_location: "Warung Bu Siti" atau "Bu Siti".
-      - Jika user hanya mengubah alamat pickup (mis. "alamat pickupnya ubah jadi warung mang ateng kak", "pickupnya aja jadi warung X"), WAJIB isi HANYA pickup_location; items = [] dan delivery_address kosong/tidak diubah agar sistem pakai existing_items dan existing address.
-      - Saat UPDATE_ORDER: jika user bilang "ganti [X] jadi [Y]", "yang pakai [X] tolong ganti jadi [Y]", "ubah [X] jadi [Y]", atau "[item] yang pakai [X] diganti jadi [Y]" (misal "ganti rendang jadi ayam pop", "yang pakai rendang tolong ganti jadi ayam pop ya kak", "nasi padang yang pakai rendang diganti jadi ayam pop aja ya kak"), artinya SUBSTITUSI (replace)—bukan tambah. WAJIB gunakan context.draft_data.existing_items. Item name dan qty ambil dari existing_items (sama); yang diubah HANYA field note: ambil existing note, ganti bagian yang mengandung X dengan Y (substring replace), hasil satu string utuh. JANGAN append/gabung teks baru di akhir note. JANGAN output note = "existing note; satu pakai Y". Contoh: existing note "satu pakai rendang; satunya lagi pakai tunjang + ayam bakar; beli di warung makan sederhana palmerah". User: "yang pakai rendang tolong ganti jadi ayam pop ya kak". Output note: "satu pakai ayam pop; satunya lagi pakai tunjang + ayam bakar; beli di warung makan sederhana palmerah". Salah: "... palmerah; satu pakai ayam pop". Benar: hanya satu occurrence "rendang" diganti "ayam pop" di tempat yang sama.
-      - Saat UPDATE_ORDER: jika user bilang "yang [X] tidak jadi" / "yang [X] batal" / "yang [X] dihapus" / "[X] dihapus aja" atau "[item] jadinya [N] porsi aja" (misal "yang ayam bakar tidak jadi, nasi padangnya jadinya 1 porsi aja yang pake ayam pop aja", "yang satunya pakai tunjang dihapus aja kak, nasi padangnya 1 porsi aja jadinya"), WAJIB gunakan context.draft_data.existing_items. Artinya: hapus/batalkan varian yang disebut (X) dari note—hapus seluruh segment yang mengandung X; ubah qty jadi N jika user bilang "N porsi aja jadinya"; note output HANYA berisi segment varian yang tetap dipesan plus bagian umum (mis. "beli di warung ..."). Kirim item LENGKAP dengan note LENGKAP setelah penghapusan—jangan sisakan teks varian yang sudah dihapus. Contoh: existing_items = [{ item: "Nasi Padang", qty: 2, note: "satu pakai ayam pop; satunya lagi pakai tunjang; beli di warung makan sederhana palmerah" }]. User: "yang satunya pakai tunjang dihapus aja kak, nasi padangnya 1 porsi aja jadinya". Output: items: [{ item: "Nasi Padang", qty: 1, note: "satu pakai ayam pop; beli di warung makan sederhana palmerah" }]. JANGAN output note yang masih ada "satunya lagi pakai tunjang". Selama proses order, pelanggan bisa menghapus informasi (item, jumlah, catatan item): pahami konteks "hapus/batal" dan output note setelah penghapusan segment yang dimaksud, tanpa duplikasi.
-      - Jika user bilang "[item] [N] porsi, satu pakai [X], satunya lagi pakai [Y]" atau "... satunya lagi pakai [Y] + [Z]" (misal "nasi padang 2 porsi, satu pakai rendang, satunya lagi pakai tunjang + ayam bakar"), artinya SEMUA itu varian dari SATU item: porsi pertama pakai X, porsi kedua pakai Y atau Y+Z (lauk/toping). JANGAN pisahkan "[Y]" atau "[Z]" menjadi item terpisah. Output: satu item dengan qty = N dan note = "satu pakai X; satunya lagi pakai Y" atau "satu pakai X; satunya lagi pakai Y + Z". Contoh: "saya mau pesan nasi padang 2 porsi, satu pakai rendang, satunya lagi pakai tunjang + ayam bakar" → items: [{ item: "Nasi Padang", qty: 2, note: "satu pakai rendang; satunya lagi pakai tunjang + ayam bakar" }]. Salah: items Nasi Padang (x2) + Ayam Bakar (x1). Benar: satu item Nasi Padang (qty 2) dengan note yang menyebut rendang untuk porsi pertama dan tunjang + ayam bakar untuk porsi kedua.
-      - Pisahkan item berdasarkan kata penghubung seperti "sama", "dan", "plus", "sekalian" HANYA ketika merujuk ke menu/order terpisah (mis. "nasi padang sama es teh"). Jangan pisah ketika "satu pakai X, satunya lagi pakai Y + Z" (itu varian satu item).
-      - Contoh interpretasi:
-        * "gorenagn campur campur aja ya belikan 10 rbu aja. sama pisgor yg panas ya 15k"
-          -> items:
-            - Gorengan Campur (qty 1, note: "campur campur; harga 10rb")
-            - Pisang Goreng (qty 1, note: "panas; harga 15k")
-        * "tambah nasgor 2 porsi 25rb ya"
-          -> items: Nasi Goreng (qty 2, note: "harga 25rb")
-        * "titip pisgor panas aja 15k"
-          -> items: Pisang Goreng (qty 1, note: "panas; harga 15k")
-        * "kebabnya beli di warung abah rusli, ukuran standar + keju yang harganya 17rbu"
-          -> items: Kebab (qty 1, note: "beli di warung abah rusli; ukuran standar; keju; harga 17rb")
-          -> JANGAN isi pickup_location dengan "warung abah rusli" (itu titip/beli di tempat lain, bukan pickup utama).
-        * "saya mau pesan nasi padang 2 porsi, satu pakai rendang, satunya lagi pakai tunjang + ayam bakar"
-          -> items: [{ item: "Nasi Padang", qty: 2, note: "satu pakai rendang; satunya lagi pakai tunjang + ayam bakar" }]
-          -> JANGAN output Ayam Bakar sebagai item terpisah; "ayam bakar" di sini adalah lauk varian porsi kedua nasi padang.
-        * "saya mau pesan burger bangor yang paket blenger premium 1, tolong belikan dimana saja"
-          -> items: [{ item: "Burger Bangor", qty: 1, note: "paket blenger premium; belikan dimana saja" }]
-          -> pickup_location: "Dimana saja" (bukan "Burger Bangor Yang" atau nama item).
-        * "mau pesan mie goreng mang ateng"
-          -> items: [{ item: "Mie Goreng", qty: 1, note: "" }]
-          -> pickup_location: "Warung Mang Ateng" atau "Mang Ateng" (BUKAN "Mie Goreng Mang Ateng").
-        * "alamat pickupnya ubah jadi warung mang ateng kak"
-          -> items: [] (pakai existing), pickup_location: "Warung Mang Ateng", delivery_address: tidak diubah.
-        * "antar ke kantor bkpsdm ya. ke ruang pak samsi. bilang aja titipan dri bu titin."
-          -> delivery_address: "Kantor BKPSDM, ruang Pak Samsi" (alamat/lokasi antar)
-          -> order_notes: ["Bilang aja titipan dari Bu Titin"] (catatan titip saja, BUKAN seluruh kalimat)
-
-      FORMAT OUTPUT JSON (WAJIB):
-      {
-        "intent": "ORDER_COMPLETE" | "ORDER_INCOMPLETE" | "UPDATE_ORDER" | "CONFIRM_FINAL" | "CANCEL" | "CHECK_STATUS" | "CHITCHAT",
-        "data": {
-           "items": [{ "item": "Nama Menu", "qty": 1, "note": "pedas" }],
-           "pickup_location": "String (Nama Warung/Toko)",
-           "delivery_address": "String (Alamat Lengkap)",
-           "order_notes": ["String catatan tambahan"],
-           "remove_items": ["Nama item yang ingin dihapus"],
-           "remove_notes": ["Potongan catatan yang ingin dihapus"]
-        },
-        "ai_reply": "String text untuk user"
+    if (url) {
+      try {
+        const resp = await axios.get(url, { timeout: 15000 });
+        const data = resp?.data;
+        if (this._isValidPlaceList(data)) {
+          cached.data = data;
+          cached.fetchedAt = now;
+          return data;
+        }
+      } catch (e) {
+        // fallback di bawah
       }
+    }
 
-      GUIDE PENGISIAN 'ai_reply':
-      - Jika CHITCHAT (Out of scope): Tolak sopan.
-      - Jika CHITCHAT (Sapaan + mau pesan/order tanpa detail item): Balas sapaan lalu minta tulis pesanan dengan lengkap (nama item, jumlah, harga per item). Contoh: "Halo kak! Silakan tuliskan pesanan kamu dengan lengkap ya: nama item, jumlah, dan harga per item (jika ada). Contoh: Nasi Goreng 2 porsi 25rb, Es Teh 2 gelas 5rb. Setelah itu sebut alamat pickup dan alamat antar ya kak."
-      - Jika CHITCHAT (Sapaan biasa tanpa mau pesan): Balas dengan sapaan balik (misal "Pagi kak! Ada yang bisa dibantu?", "Halo! Silakan pesan ya kak.").
-      - Jika CHITCHAT (Sopan santun/terima kasih): Balas ramah ("Sama-sama kak!").
-      - Jika ORDER_INCOMPLETE: Tanyakan data yang kurang (Contoh: "Siap kak, mau diantar ke alamat mana?").
-      - Jika ORDER_COMPLETE: Cukup bilang "Baik kak, mohon dicek ringkasannya di bawah ini 👇" (JANGAN TULIS ULANG STRUK DI SINI, Sistem yang akan buat).
-    `;
+    cached.data = FALLBACK_SUMBAWA_PLACES;
+    cached.fetchedAt = now;
+    return cached.data;
+  }
+
+  async parseIntent(text, context) {
+    const SYSTEM_PROMPT = `
+ROLE: Customer Service MyJek (Aplikasi Ojek & Kurir Online di Sumbawa). Tugasmu HANYA menentukan INTENT dari pesan pelanggan.
+
+INTENT:
+- GREETING: Sapaan saja tanpa pesan order (Pagi, Halo, Assalamualaikum).
+- ORDER: Detail pesanan / mau pesan / jemput / belikan sesuatu.
+- CONFIRMATION: Konfirmasi (Ok, Ya, Lanjut, Sip, Gas).
+- CANCELLATION: Batalkan pesanan (Batal, Gak jadi, Cancel).
+- CHECK_STATUS: Tanya status pesanan (sampai mana?, udah jalan belum?).
+- HUMAN_HANDOFF: Minta admin/CS (#HUMAN, Admin, Komplain).
+- REKOMENDASI_TEMPAT: Tanya rekomendasi tempat makan/minum/restoran/kafe/wisata di Sumbawa (rekomen tempat makan, wisata Sumbawa, cafe).
+- OTHER: Di luar kategori di atas.
+
+Aturan: Jika sapaan + pesanan sekaligus, intent = ORDER.
+Output HANYA JSON: { "intent": "NAMA_INTENT" }
+`;
+
+    const parseJsonMaybe = (value) => {
+      if (typeof value !== "string") return null;
+      const s = value.trim();
+      if (!s.startsWith("{") || !s.endsWith("}")) return null;
+      try {
+        return JSON.parse(s);
+      } catch {
+        return null;
+      }
+    };
+
+    const heuristicIntent = (raw) => {
+      const t = String(raw || "").toLowerCase();
+      if (t === "#human" || /\b(admin|cs|komplain)\b/i.test(t)) return "HUMAN_HANDOFF";
+      if (/\b(batal|cancel|gak jadi|tidak jadi)\b/i.test(t)) return "CANCELLATION";
+      if (/\b(cek|status|sampai mana|udah jalan|sudah jalan)\b/i.test(t)) return "CHECK_STATUS";
+      if (
+        /(rekomendasi|rekomen|rekomendasiin|saran|referensi|list tempat|daftar tempat)/i.test(t) &&
+        /(tempat|resto|restoran|rm|rumah makan|makan|minum|kafe|cafe|wisata|pantai|gunung|tour|turis)/i.test(t)
+      )
+        return "REKOMENDASI_TEMPAT";
+      if (/^(ok|oke|ya|iya|sip|siap|y|yes|gas|lanjut|setuju|boleh)\b/i.test(t)) return "CONFIRMATION";
+      if (/\b(halo|hai|pagi|siang|sore|malam|assalamualaikum)\b/i.test(t)) return "GREETING";
+      return null;
+    };
 
     const result = await this.adapter.generateResponse(SYSTEM_PROMPT, text, context);
-
-    return result;
+    const parsed = parseJsonMaybe(result);
+    const intent = parsed?.intent || result?.intent || heuristicIntent(text) || "OTHER";
+    return { intent };
   }
 
   async generateReply(responseSpec = {}) {
@@ -153,6 +136,11 @@ class AIService {
         ORDER_CONFIRMED, COURIER_ALREADY_HAS_ORDER, ORDER_TAKEN, COURIER_ASSIGNED.
       - Jika status lain, jangan tampilkan item/pickup/antar/catatan.
       - Jika context.flags.show_details = false, tetap jangan tampilkan detail meski status di atas.
+
+      MEKANISME TAMPILAN DETAIL ORDER (SESUAI DATA SAAT INI):
+      - Order di sistem hanya menyimpan chat_messages (seluruh pesan chat pelanggan). Jika context.chat_messages ada (array of string) dan context.items kosong/tidak ada, tampilkan sebagai: "📋 Pesan order dari pelanggan:" lalu tiap elemen chat_messages sebagai baris/bullet. Jangan mengarang item/pickup/address jika tidak ada di context.
+      - Jika context.items, context.pickup, context.address ada (ringkasan terstruktur), tetap boleh tampilkan dalam format 📦 Detail Pesanan, 📍 Pickup dari, 📍 Antar ke seperti biasa.
+      - Prioritas: jika chat_messages ada dan items/pickup/address kosong, gunakan format pesan chat; jika items/pickup/address ada, gunakan format ringkasan.
 
       FORMAT WAJIB BERDASARKAN status (response_spec.status):
 
@@ -236,17 +224,8 @@ class AIService {
       5b) ORDER_UPDATE_APPLIED — hanya untuk UPDATE ORDER BERJALAN (setelah pelanggan konfirmasi OK/Ya):
          - Jika role = CUSTOMER: Tampilkan ringkasan update saja (context.update_items / context.update_notes). Konfirmasi bahwa update sudah berhasil kami simpan ke database dan kurir sudah kami infokan. TANPA kalimat minta konfirmasi OK/Ya lagi. Natural. Jangan tampilkan detail order lengkap kecuali show_details = true.
          - Jika context.flags.address_update_blocked atau pickup_update_blocked = true, jelaskan singkat bahwa alamat pickup/antar tidak bisa diubah saat pesanan sedang berjalan.
-         - Jika role = COURIER, gunakan format wajib berikut:
-           "Halo rider, ada update pesanan order dari pelanggan nih! 😊
-            Berikut detail ordernya saat ini:
-            📦 Detail Pesanan:
-            {daftar item}
-            📍 Pickup dari: {pickup}
-            📍 Antar ke: {address}
-            {Catatan: jika ada, tampilkan dengan bullet}
-            Tetap semangat dan hati-hati di jalan ya kak 🚴‍♂️✨"
-         - Sertakan Order ID dan Kode ID (context.order_id, context.short_code) di awal detail jika ada.
-         - Format ini WAJIB dipakai persis ketika role = COURIER.
+         - Jika role = COURIER: "Halo rider, ada update pesanan order dari pelanggan nih! 😊" Lalu "Berikut detail ordernya saat ini:" — jika context.chat_messages ada, tampilkan "📋 Pesan order dari pelanggan:" dan list pesan; jika context.items ada, tampilkan 📦 Detail Pesanan, 📍 Pickup dari, 📍 Antar ke, Catatan. Akhiri dengan kalimat semangat dan hati-hati di jalan.
+         - Sertakan Order ID dan Kode (context.order_id, context.short_code) jika ada.
       5c) ORDER_UPDATE_CANCELLED (CUSTOMER):
          - Dikirim saat pelanggan membatalkan update pesanan (tidak jadi update). JANGAN sertakan kalimat "Kurir masih dalam proses antar" atau "mohon ditunggu ya kak".
          - Sapa singkat, konfirmasi pesanan tidak jadi diupdate, lalu tutup dengan kalimat yang relevan dan natural (misal: "Kalau mau pesan lagi lain waktu, silakan kabari ya kak" atau "Terima kasih ya kak 😊").
@@ -302,20 +281,8 @@ class AIService {
          - Dikirim saat kurir mengirim gambar atau file yang BUKAN struk belanja / tidak relevan dengan order MyJek.
          - Balasan singkat dan sopan: tolak gambar/file tersebut, jelaskan bahwa sistem hanya menerima foto struk belanja (yang memuat total tagihan) saat sedang dalam fase belanja order. Jika kurir tidak punya order aktif: jelaskan bahwa foto hanya diterima saat sedang mengerjakan order untuk kirim struk. Jangan kasar. Contoh: "Maaf ya, gambar yang dikirim bukan struk belanja yang valid atau total tagihan tidak terdeteksi. Silakan kirim foto struk belanja yang jelas dan memuat total harganya ya." atau "Maaf, foto/file hanya diterima saat kamu sedang mengerjakan order (fase belanja) untuk mengirim struk belanja. Silakan gunakan perintah yang tersedia ya."
       12) COURIER_ASSIGNED:
-         - Format WAJIB untuk pelanggan (order ditugaskan ke kurir, termasuk saat admin buat/tugaskan order):
-           "Pesanan sudah ditugaskan kepada kurir kak {nama_pelanggan} 😊
-            🆔 Order ID: {order_id} | Kode: {short_code}
-            📦 Detail Pesanan:
-            {daftar item}
-            📍 Pickup dari: {pickup}
-            📍 Antar ke: {address}
-            Catatan:
-            {daftar catatan jika ada}
-            Nama Kurir: {courier_name}
-            Nomor HP Kurir: {courier_phone}
-            Silakan tunggu ya kak, kurir akan segera menuju lokasi.
-            Catatan: jika saya salah dalam memahami maksud kakak atau terdapat komplain/masalah tentang proses order, silahkan ketik #HUMAN untuk beralih ke human mode, nanti akan ada admin yang chat kakak ya, mohon maaf sebelumnya kak 😅🙏"
-         - Gunakan context.order_id, context.short_code, context.items, context.pickup, context.address, context.notes, context.courier_name, context.courier_phone, context.user_name.
+         - Format untuk pelanggan (order ditugaskan ke kurir): Sapa (kak {nama_pelanggan}), sampaikan pesanan sudah ditugaskan ke kurir. Sertakan Order ID dan Kode jika ada. Lalu: jika context.chat_messages ada, tampilkan "📋 Pesan order kamu:" dan list pesan; jika context.items/pickup/address ada, tampilkan 📦 Detail Pesanan, 📍 Pickup dari, 📍 Antar ke, Catatan. Lalu Nama Kurir, Nomor HP Kurir, kalimat tunggu kurir. Akhiri dengan Catatan #HUMAN.
+         - Gunakan context.order_id, context.short_code, context.courier_name, context.courier_phone, context.user_name. Untuk isi order: context.chat_messages (array) atau context.items, context.pickup, context.address, context.notes.
       13) BILL_UPDATED / BILL_CONFIRM_PROMPT:
          - Jawaban singkat: tampilkan total terbaru dan minta konfirmasi (OK/Y) atau revisi angka.
          - Jangan tampilkan detail order.
@@ -331,21 +298,12 @@ class AIService {
       17) COURIER_LOCATION_UPDATED:
          - Konfirmasi lokasi tersimpan dan ucapkan terima kasih dan terus berhati-hati di jalan ya, semoga sehat terus. Jangan minta lokasi pelanggan.
       18) ORDER_TAKEN:
-         - Format WAJIB (termasuk saat kurir #AMBIL atau admin menugaskan order ke kurir):
-           "Pesanan sudah kamu ambil ✅
-            👤 Pelanggan: {nama_pelanggan}
-            📱 Nomor HP Pelanggan: {nomor_pelanggan}
-            📦 Detail Pesanan:
-            {daftar item, format: - Item (xqty) - note jika ada}
-            📍 Pickup dari: {pickup}
-            📍 Antar ke: {address}
-            Catatan:
-            {daftar catatan jika ada}
-            Penting: Sebelum lanjut untuk menerima order, Jika belum update lokasi, tolong update dulu koordinat lokasinya yah kak, agar saya bisa carikan order aktif yang terdekat dengan kakak.
-            Silahkan klik tombol Clip (📎) di WA -> Pilih Location -> Send Your Current Location.
-            Terima kasih, semangat kak!😃👍
-            Catatan: jika ada kendala atau komplain, ketik #HUMAN untuk beralih ke human mode ya, nanti admin yang akan bantu."
-         - Gunakan context.flags.customer_name / context.user_name untuk nama pelanggan, context.flags.customer_phone / context.user_phone untuk nomor. WAJIB sertakan instruksi lokasi (Clip 📎 -> Location) dan penutup Terima kasih semangat + Catatan #HUMAN.
+         - Format WAJIB (termasuk saat kurir ambil order atau admin menugaskan):
+           Baris pertama: "Pesanan sudah kamu ambil ✅"
+           Lalu: "👤 Pelanggan: {nama_pelanggan}" dan "📱 Nomor HP Pelanggan: {nomor_pelanggan}" (WAJIB dari context).
+           Lalu salah satu: (A) Jika context.chat_messages ada (array): "📋 Pesan order dari pelanggan:" lalu tiap pesan sebagai baris; (B) Jika context.items ada: "📦 Detail Pesanan:", daftar item, "📍 Pickup dari:", "📍 Antar ke:", "Catatan:" seperti biasa.
+           Lalu: kalimat singkat agar kurir bisa kontak pelanggan langsung; jika belum update lokasi, minta update koordinat (Clip 📎 -> Location). Penutup: Terima kasih semangat + Catatan #HUMAN.
+         - Gunakan context.user_name / context.flags.customer_name untuk nama, context.user_phone / context.flags.customer_phone untuk nomor. WAJIB sertakan Catatan #HUMAN di akhir.
       19) COURIER_ORDER_STATUS (role COURIER):
          - KRITIKAL: Bagian (1) WAJIB sesuai context.order_status. Gunakan TERJEMAH STATUS (COURIER) untuk nilai order_status tersebut saja. Jika order_status = BILL_SENT jangan pakai kalimat ON_PROCESS (minta struk). Jika order_status = ON_PROCESS baru pakai kalimat minta struk.
          - Format balasan WAJIB: (1) Kalimat status + langkah selanjutnya LENGKAP sesuai order_status, (2) "Berikut detail ordernya:", (3) blok detail order LENGKAP, (4) penutup untuk kurir.
@@ -743,6 +701,182 @@ class AIService {
       console.error(`Gagal download gambar: ${url} | ${error.message}`);
       return null;
     }
+  }
+
+  /**
+   * Rekomendasi tempat dinamis: AI memilih tempat yang sesuai kebutuhan pelanggan dari daftar resmi,
+   * lalu memformat balasan yang rapi. Jika AI gagal/format salah, fallback tetap mengirim list.
+   */
+  async generatePlaceRecommendationReply(places, userMessage = "", userName = "kak") {
+    const name = userName && userName !== "Pelanggan" ? userName : "kak";
+    if (!places || !places.length) {
+      return `Maaf kak ${name}, data rekomendasi tempat sedang tidak tersedia. Silakan coba lagi atau ketik #HUMAN untuk bantuan admin 🙏`;
+    }
+
+    const parseJsonMaybe = (value) => {
+      if (typeof value !== "string") return null;
+      const s = value.trim();
+      if (!s.startsWith("{") || !s.endsWith("}")) return null;
+      try {
+        return JSON.parse(s);
+      } catch {
+        return null;
+      }
+    };
+
+    const inferWantedType = (text) => {
+      const t = String(text || "").toLowerCase();
+      if (/(wisata|pantai|gunung|air terjun|spot|view|sunset|liburan|tour|turis)/i.test(t))
+        return "wisata";
+      if (/(kopi|cafe|kafe|nongkrong|minum|coffee|espresso|latte|matcha|boba)/i.test(t))
+        return "minum";
+      if (/(makan|resto|restoran|rm |rumah makan|kuliner|nasi|ayam|ikan|seafood|sate)/i.test(t))
+        return "makan";
+      return "mixed";
+    };
+
+    const normalize = (s) =>
+      String(s || "")
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const inferWantedArea = (text) => {
+      const t = normalize(text);
+      if (!t) return null;
+
+      // area candidates berasal dari catalog (dinamis), bukan hardcode
+      const areaCandidates = Array.from(
+        new Set(
+          (places || [])
+            .map((p) => p?.area)
+            .filter(Boolean)
+            .map((a) => String(a).trim())
+            .filter((a) => a.length > 1)
+        )
+      );
+
+      // match direct "contains"
+      const direct = areaCandidates.find((a) => t.includes(normalize(a)));
+      if (direct) return direct;
+
+      // match kata setelah "di/sekitar/area/wilayah"
+      const m = t.match(/\b(di|sekitar|area|wilayah)\s+([a-z0-9 .'-]{3,40})/i);
+      const hint = m?.[2] ? normalize(m[2]) : "";
+      if (hint) {
+        const fuzzy = areaCandidates.find((a) => normalize(a).includes(hint) || hint.includes(normalize(a)));
+        if (fuzzy) return fuzzy;
+      }
+
+      return null;
+    };
+
+    const pickPlacesFallback = () => {
+      const wanted = inferWantedType(userMessage);
+      const wantedArea = inferWantedArea(userMessage);
+      const shuffle = (arr) => {
+        const a = [...arr];
+        for (let i = a.length - 1; i > 0; i -= 1) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [a[i], a[j]] = [a[j], a[i]];
+        }
+        return a;
+      };
+      const pool = wantedArea
+        ? places.filter((p) => normalize(p?.area) === normalize(wantedArea))
+        : places;
+      const byType = (type) =>
+        shuffle(pool.filter((p) => String(p?.type || "").toLowerCase() === type));
+      let picked = [];
+
+      if (wanted === "mixed") {
+        picked = [
+          ...byType("makan").slice(0, 6),
+          ...byType("minum").slice(0, 4),
+          ...byType("wisata").slice(0, 4),
+        ];
+      } else {
+        picked = byType(wanted).slice(0, 12);
+        if (picked.length < 10) {
+          const others = shuffle(pool.filter((p) => !picked.includes(p))).slice(
+            0,
+            15 - picked.length
+          );
+          picked = [...picked, ...others];
+        }
+      }
+
+      if (picked.length > 15) picked = picked.slice(0, 15);
+      // kalau area spesifik tapi datanya sedikit, lengkapi dari catalog global
+      if (picked.length < 10) {
+        const filler = shuffle(places.filter((p) => !picked.includes(p))).slice(0, 15 - picked.length);
+        picked = [...picked, ...filler].slice(0, Math.min(15, places.length));
+      }
+      return picked;
+    };
+
+    const formatPlacesReply = (picked) => {
+      const intro = `Siap kak ${name}, ini beberapa tempat yang rekomen di Sumbawa:`;
+      const list = picked
+        .filter(Boolean)
+        .slice(0, 15)
+        .map((p) => {
+          const type = String(p.type || "").toLowerCase();
+          const label = type === "wisata" ? "🏝️" : type === "minum" ? "☕" : "🍽️";
+          const title = p.name ? `${label} *${p.name}*` : `${label} *Rekomendasi*`;
+          const area = p.area ? ` (${p.area})` : "";
+          const desc = p.description ? `\n${p.description}` : "";
+          const map = p.mapUrl ? `\n🗺️ Peta: ${p.mapUrl}` : "";
+          return `${title}${area}${desc}${map}`;
+        })
+        .join("\n\n");
+
+      return (
+        `${intro}\n\n` +
+        `📍 *Daftar rekomendasi:*\n\n` +
+        `${list}\n\n` +
+        `Silakan klik link peta untuk melihat lokasi. Kalau mau pesan antar ke salah satu tempat ini, bisa order lewat chat ya kak 🙏`
+      );
+    };
+
+    const wantedArea = inferWantedArea(userMessage);
+    const systemPrompt = `
+ROLE: Asisten MyJek (layanan ojek & kurir di Sumbawa).
+Tugas: Berikan rekomendasi tempat makan/minum/wisata di Pulau Sumbawa berdasarkan pertanyaan pelanggan.
+
+DATA TEMPAT (WAJIB pilih HANYA dari list ini):
+${JSON.stringify(places, null, 0)}
+
+ATURAN:
+1. Pilih 10–15 tempat yang paling sesuai kebutuhan pelanggan.
+   - Jika pelanggan menyebut wilayah/area tertentu, PRIORITASKAN tempat di area itu. Area diminta: ${wantedArea ? `"${wantedArea}"` : "(tidak spesifik)"}.
+2. Untuk setiap tempat: gunakan persis name, description, area, mapUrl dari data (jangan ubah URL).
+3. Format WhatsApp rapi: emoji kategori, nama, area, deskripsi singkat, dan mapUrl di baris terpisah. Pisahkan antar tempat dengan baris kosong.
+4. Usahakan variasi rekomendasi (tidak selalu urutan yang sama) selama tetap memilih dari data.
+5. Akhiri 1 kalimat ajakan klik link peta + bisa order lewat chat.
+6. Output HANYA JSON: { "reply": "..." }.
+`;
+
+    try {
+      const result = await this.adapter.generateResponse(
+        systemPrompt,
+        `Pertanyaan pelanggan: "${userMessage}". Nama panggilan: ${name}.`,
+        { placesCount: places.length, userName: name }
+      );
+      const parsed = parseJsonMaybe(result);
+      const reply = parsed?.reply || result?.reply || result;
+      if (typeof reply === "string" && reply.trim()) {
+        const looksLikeList =
+          /🗺️\s*Peta:/i.test(reply) ||
+          /📍\s*\*Daftar rekomendasi/i.test(reply) ||
+          /🍽️|☕|🏝️/.test(reply);
+        if (looksLikeList) return reply.trim();
+      }
+    } catch (e) {
+      console.error("generatePlaceRecommendationReply error:", e.message);
+    }
+
+    return formatPlacesReply(pickPlacesFallback());
   }
 }
 

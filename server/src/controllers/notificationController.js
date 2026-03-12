@@ -1,6 +1,7 @@
 import { Op } from "sequelize";
 import { Notification, Admin } from "../models/index.js";
 import { sendEmailNotification } from "../services/emailService.js";
+import { messageService } from "../services/messageService.js";
 import { getHandoffEmailTemplate } from "../utils/emailTemplates.js";
 import logger from "../utils/logger.js";
 
@@ -82,9 +83,9 @@ export const createSystemNotification = async (
     // Socket Emit
     if (io) io.emit("new-notification", notif);
 
-    // Kirim Email jika HUMAN_HANDOFF
+    // Kirim Email + WhatsApp ke admin jika HUMAN_HANDOFF
     if (type === "HUMAN_HANDOFF") {
-      const admins = await Admin.findAll({ attributes: ["email"] });
+      const admins = await Admin.findAll({ attributes: ["email", "phone"] });
       const emailList = admins.map((a) => a.email).filter((e) => e);
 
       if (emailList.length > 0) {
@@ -98,6 +99,20 @@ export const createSystemNotification = async (
         sendEmailNotification(emailList, `🚨 [ALERT] ${title}`, htmlContent).catch((e) =>
           logger.error("Email fail:", e)
         );
+      }
+
+      const waMessage =
+        `🚨 *Human Hand-off*\n\n` +
+        `Ada pelanggan butuh bantuan.\n\n` +
+        `👤 ${extraData?.userName || "Pelanggan"}\n` +
+        `📱 ${referenceId}\n\n` +
+        `Buka dashboard untuk membalas.`;
+      for (const admin of admins) {
+        if (admin.phone && String(admin.phone).trim()) {
+          messageService.sendMessage(admin.phone.trim(), waMessage).catch((e) =>
+            logger.error("WhatsApp notif ke admin gagal:", e)
+          );
+        }
       }
     }
     return notif;

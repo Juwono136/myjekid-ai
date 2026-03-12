@@ -1,6 +1,6 @@
 import { FiAlertTriangle, FiCheckCircle } from "react-icons/fi";
 
-const ModeToggleModal = ({ isOpen, onClose, onConfirm, targetMode }) => {
+const ModeToggleModal = ({ isOpen, onClose, onConfirm, targetMode, isLoading = false }) => {
   if (!isOpen) return null;
 
   const isSwitchingToHuman = targetMode === "HUMAN";
@@ -31,12 +31,12 @@ const ModeToggleModal = ({ isOpen, onClose, onConfirm, targetMode }) => {
           {isSwitchingToHuman ? (
             <>
               Anda akan masuk ke <b>Mode Human</b>.<br />
-              Bot AI akan <b>dimatikan sementara selama 30 menit</b> agar tidak mengganggu Anda.
+              Bot AI akan <b>dimatikan sementara (maks. 5 jam)</b>. Setelah 5 jam, mode otomatis kembali ke Bot.
             </>
           ) : (
             <>
               Anda akan mengaktifkan kembali <b>Mode Bot</b>.<br />
-              AI akan mulai menjawab pesan user secara otomatis mulai dari sekarang.
+              AI akan mulai menjawab pesan user secara otomatis. Mode Human juga bisa otomatis kembali ke Bot setelah 5 jam.
             </>
           )}
         </div>
@@ -45,19 +45,21 @@ const ModeToggleModal = ({ isOpen, onClose, onConfirm, targetMode }) => {
         <div className="flex justify-end gap-3">
           <button
             onClick={onClose}
-            className="px-3 py-2 text-xs md:text-sm font-medium text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+            disabled={isLoading}
+            className="px-3 py-2 text-xs md:text-sm font-medium text-gray-500 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
           >
             Batal
           </button>
           <button
             onClick={onConfirm}
-            className={`px-4 py-2 text-xs md:text-sm font-bold text-white rounded-lg shadow-sm transition-colors ${
+            disabled={isLoading}
+            className={`px-4 py-2 text-xs md:text-sm font-bold text-white rounded-lg shadow-sm transition-colors disabled:opacity-50 ${
               isSwitchingToHuman
                 ? "bg-[#f14c06] hover:bg-[#d94205]"
                 : "bg-emerald-600 hover:bg-emerald-700"
             }`}
           >
-            {isSwitchingToHuman ? "Ya, Ambil Alih" : "Ya, Aktifkan Bot"}
+            {isLoading ? "Memproses..." : isSwitchingToHuman ? "Ya, Ambil Alih" : "Ya, Aktifkan Bot"}
           </button>
         </div>
       </div>

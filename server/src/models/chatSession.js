@@ -26,6 +26,11 @@ const ChatSession = sequelize.define(
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW,
     },
+    human_since: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "Waktu mulai mode HUMAN; dipakai untuk auto-revert ke BOT setelah 5 jam",
+    },
   },
   {
     timestamps: true,

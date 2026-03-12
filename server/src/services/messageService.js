@@ -19,14 +19,45 @@ const apiClient = axios.create({
   },
 });
 
+/** Format nomor ke chatId WAHA. Jika sudah berisi @ (mis. @c.us, @lid), kembalikan apa adanya. */
 const formatToWhatsAppId = (number) => {
   if (!number) return null;
-  let cleaned = number.toString().replace(/[^0-9]/g, "");
+  const s = number.toString().trim();
+  if (s.includes("@")) return s;
+  let cleaned = s.replace(/[^0-9]/g, "");
   if (cleaned.startsWith("08")) cleaned = "62" + cleaned.slice(1);
   else if (cleaned.startsWith("8")) cleaned = "62" + cleaned;
   if (!cleaned.endsWith("@c.us")) cleaned += "@c.us";
   return cleaned;
 };
+
+/**
+ * Resolve LID (Linked ID, mis. 254...@lid) ke nomor HP via API WAHA.
+ * GET /api/{session}/lids/{lid} → { pn: "628xxx@c.us" }
+ * @param {string} lidOrJid - payload.from (mis. "254386768994458@lid") atau hanya "254386768994458"
+ * @returns {Promise<string|null>} - nomor 62xxx atau null
+ */
+export async function getPhoneByLid(lidOrJid) {
+  if (!lidOrJid || typeof lidOrJid !== "string") return null;
+  const lidPart = lidOrJid.trim().split("@")[0];
+  if (!lidPart || !/^\d+$/.test(lidPart)) return null;
+  try {
+    const session = encodeURIComponent(WAHA_SESSION);
+    const lidEnc = encodeURIComponent(lidPart);
+    const { data } = await apiClient.get(`/api/${session}/lids/${lidEnc}`);
+    const pn = data?.pn;
+    if (!pn || typeof pn !== "string") return null;
+    const beforeAt = pn.split("@")[0];
+    const digits = (beforeAt || "").replace(/[^0-9]/g, "");
+    if (!digits || digits.length < 10) return null;
+    let normalized = digits;
+    if (normalized.startsWith("08")) normalized = "62" + normalized.slice(1);
+    else if (normalized.startsWith("8")) normalized = "62" + normalized;
+    return normalized.startsWith("62") ? normalized : null;
+  } catch (err) {
+    return null;
+  }
+}
 
 export const messageService = {
   // KIRIM TEXT
@@ -102,6 +133,25 @@ export const messageService = {
 
       // Fallback
       await this.sendMessage(to, `${caption}\n\n_(Gambar gagal dimuat, mohon maaf)_.`);
+      return false;
+    }
+  },
+
+  // KIRIM LOKASI (WAHA: POST /api/sendLocation)
+  async sendLocation(to, latitude, longitude, title = "Lokasi") {
+    try {
+      const chatId = formatToWhatsAppId(to);
+      if (!chatId) return false;
+      await apiClient.post("/api/sendLocation", {
+        session: WAHA_SESSION,
+        chatId,
+        latitude: Number(latitude),
+        longitude: Number(longitude),
+        title: String(title),
+      });
+      return true;
+    } catch (error) {
+      console.error(`❌ Gagal Kirim Lokasi: ${error.message}`);
       return false;
     }
   },

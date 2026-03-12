@@ -4,7 +4,6 @@ import { fetchOrderDetail, clearOrderDetail } from "../../features/orderSlice";
 import { FiX, FiNavigation } from "react-icons/fi";
 import Loader from "../Loader";
 
-import OrderRouteInfo from "./OrderRouteInfo";
 import OrderTimeline from "./OrderTimeline";
 import OrderEvidence from "./OrderEvidence";
 import OrderCourierInfo from "./OrderCourierInfo";
@@ -28,18 +27,8 @@ const OrderDetailModal = ({ isOpen, onClose, orderId }) => {
       currency: "IDR",
       minimumFractionDigits: 0,
     }).format(num);
-  const parseItems = (json) => {
-    try {
-      return typeof json === "string" ? JSON.parse(json) : json || [];
-    } catch {
-      return [];
-    }
-  };
-  const items = orderDetail ? parseItems(orderDetail.items_summary) : [];
-  const notes = Array.isArray(orderDetail?.order_notes)
-    ? orderDetail.order_notes
-        .map((note) => (typeof note === "string" ? note : note?.note))
-        .filter(Boolean)
+  const chatMessages = Array.isArray(orderDetail?.chat_messages)
+    ? orderDetail.chat_messages.map((m) => (typeof m === "string" ? m : m?.body ?? ""))
     : [];
 
   const getStatusColor = (status) => {
@@ -123,80 +112,49 @@ const OrderDetailModal = ({ isOpen, onClose, orderId }) => {
                   <OrderCourierInfo courier={orderDetail.courier} />
                 </div>
 
-                {/* Route Info */}
-                <OrderRouteInfo order={orderDetail} />
-
-                <div className="divider my-6"></div>
-
-                {/* ITEMS LIST TABLE */}
+                {/* Pesan order (chat pelanggan) */}
                 <h4 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
-                  Rincian Menu{" "}
-                  <span className="badge badge-sm badge-neutral">{items.length} Item</span>
+                  Pesan order (chat pelanggan){" "}
+                  <span className="badge badge-sm badge-neutral">{chatMessages.length} pesan</span>
                 </h4>
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
-                  <table className="table w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-500">
-                      <tr>
-                        <th className="w-16 text-center">Qty</th>
-                        <th>Menu Item</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {items.length > 0 ? (
-                        items.map((item, idx) => (
-                          <tr key={idx} className="border-b border-gray-100 last:border-none">
-                            <td className="text-center font-bold text-gray-600 bg-gray-50/30">
-                              {item.qty}x
-                            </td>
-                            <td className="py-3">
-                              <div className="font-medium text-gray-800">{item.item}</div>
-                              {item.note && (
-                                <div className="text-xs text-orange-600 mt-1 italic">
-                                  Note: {item.note}
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan="2" className="text-center py-6 text-gray-400 italic">
-                            Tidak ada item
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* ORDER NOTES */}
-                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
                   <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
-                    <h4 className="text-sm font-bold text-gray-800">Catatan Order</h4>
+                    <h4 className="text-sm font-bold text-gray-800">Seluruh pesan yang di-forward ke kurir</h4>
                   </div>
                   <div className="p-4">
-                    {notes.length > 0 ? (
-                      <ul className="space-y-2 text-sm text-gray-700">
-                        {notes.map((note, idx) => (
+                    {chatMessages.length > 0 ? (
+                      <ul className="space-y-3 text-sm text-gray-700">
+                        {chatMessages.map((msg, idx) => (
                           <li key={idx} className="flex items-start gap-2">
-                            <span className="mt-1 h-1.5 w-1.5 rounded-full bg-orange-400"></span>
-                            <span>{note}</span>
+                            <span className="mt-1.5 h-2 w-2 rounded-full bg-orange-400 shrink-0"></span>
+                            <span className="leading-relaxed">{msg}</span>
                           </li>
                         ))}
                       </ul>
                     ) : (
-                      <p className="text-sm text-gray-400 italic">Tidak ada catatan.</p>
+                      <p className="text-sm text-gray-400 italic">Tidak ada pesan.</p>
                     )}
                   </div>
                 </div>
 
                 {/* TOTAL */}
-                <div className="flex justify-end pt-2 border-t border-gray-100">
-                  <div className="text-right">
-                    <p className="text-xs text-gray-500 mb-1">Total Pembayaran</p>
-                    <p className="text-2xl font-bold text-[#f14c06]">
-                      {formatRupiah(orderDetail.total_amount)}
-                    </p>
+                <div className="flex flex-col gap-2 pt-2 border-t border-gray-100">
+                  {orderDetail.receipt_total != null &&
+                    Number(orderDetail.receipt_total) !== Number(orderDetail.total_amount) && (
+                      <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm">
+                        <p className="text-amber-800 font-medium mb-1">Kurir merevisi total tagihan</p>
+                        <p className="text-gray-600 text-xs">
+                          Total dari struk: {formatRupiah(orderDetail.receipt_total)} → Total akhir: {formatRupiah(orderDetail.total_amount)}
+                        </p>
+                      </div>
+                    )}
+                  <div className="flex justify-end">
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500 mb-1">Total Pembayaran</p>
+                      <p className="text-2xl font-bold text-[#f14c06]">
+                        {formatRupiah(orderDetail.total_amount)}
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>

@@ -16,8 +16,6 @@ export function startDispatchScheduler() {
         where: {
           status: "LOOKING_FOR_DRIVER",
           last_offered_at: { [Op.ne]: null, [Op.lt]: cutoff },
-          pickup_latitude: { [Op.ne]: null },
-          pickup_longitude: { [Op.ne]: null },
         },
         attributes: ["order_id"],
       });

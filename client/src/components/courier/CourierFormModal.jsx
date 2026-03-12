@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { FiX } from "react-icons/fi";
+import { SHIFT_OPTIONS } from "../../constants/courier";
 
 const CourierFormModal = ({
   isOpen,
@@ -95,9 +96,15 @@ const CourierFormModal = ({
                 onChange={(e) => setFormData({ ...formData, shift_code: parseInt(e.target.value) })}
                 className="select select-bordered w-full rounded-xl focus:border-orange-500 focus:outline-none"
               >
-                <option value={1}>Shift 1 (Pagi)</option>
-                <option value={2}>Shift 2 (Sore)</option>
+                {SHIFT_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label} — {opt.timeRange}
+                  </option>
+                ))}
               </select>
+              <p className="text-[11px] text-gray-400 mt-1">
+                Jam operasional kurir; status otomatis IDLE/OFFLINE sesuai shift.
+              </p>
             </div>
 
             {isEditMode && (
@@ -110,11 +117,12 @@ const CourierFormModal = ({
                   disabled={!canManageStatus}
                 >
                   <option value="OFFLINE">OFFLINE</option>
+                  <option value="IDLE">IDLE (Online)</option>
                   <option value="SUSPEND">SUSPEND</option>
                 </select>
                 {canManageStatus && (
                   <p className="text-[11px] text-gray-400 mt-2">
-                    Status hanya bisa diubah ke OFFLINE atau SUSPEND.
+                    Paksa status: OFFLINE, IDLE (online), atau SUSPEND. Dalam jam shift, OFFLINE bisa otomatis jadi IDLE.
                   </p>
                 )}
               </div>

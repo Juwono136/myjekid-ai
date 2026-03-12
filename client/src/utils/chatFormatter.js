@@ -19,7 +19,9 @@ export const formatWhatsAppToMarkdown = (text) => {
   formatted = formatted.replace(/~([^~]+)~/g, "~~$1~~");
 
   formatted = formatted
-    .replace(/\r\n/g, "\n") // normalisasi Windows newline
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
     .replace(/([^\n])\n([^\n])/g, "$1  \n$2");
 
   return formatted;

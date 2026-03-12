@@ -61,7 +61,16 @@ jobs:
           PORT: ${{ secrets.PORT }}
           NODE_ENV: ${{ secrets.NODE_ENV }}
           FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
+          ENABLE_WHATSAPP_TEST_MODE: ${{ secrets.ENABLE_WHATSAPP_TEST_MODE }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
+
+          # CHATBOT CONFIG
+          CHATBOT_BLOCKLIST_PHONES: ${{ secrets.CHATBOT_BLOCKLIST_PHONES }}
+          CHAT_PRESENCE_FALLBACK_MS: ${{ secrets.CHAT_PRESENCE_FALLBACK_MS }}
+          CHAT_PRESENCE_DELAY_MS: ${{ secrets.CHAT_PRESENCE_DELAY_MS }}
+          WA_QUEUE_MAX_SIZE: ${{ secrets.WA_QUEUE_MAX_SIZE }}
+          WA_QUEUE_BATCH_SIZE: ${{ secrets.WA_QUEUE_BATCH_SIZE }}
+          WA_QUEUE_CONCURRENCY: ${{ secrets.WA_QUEUE_CONCURRENCY }}
 
           # EMAIL CONFIG
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
@@ -74,7 +83,9 @@ jobs:
 
           # WAHA CONFIG
           WAHA_API_URL: ${{ secrets.WAHA_API_URL }}
+          WAHA_PUBLIC_URL: ${{ secrets.WAHA_PUBLIC_URL }}
           WAHA_API_KEY: ${{ secrets.WAHA_API_KEY }}
+          WAHA_SESSION: ${{ secrets.WAHA_SESSION }}
 
           # MINIO CONFIGURATION
           S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}

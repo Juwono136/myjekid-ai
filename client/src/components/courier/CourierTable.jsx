@@ -1,6 +1,7 @@
 import { FiEdit, FiTrash2 } from "react-icons/fi";
 import EmptyState from "../common/EmptyState";
 import Loader from "../Loader";
+import { getShiftLabel } from "../../constants/courier";
 
 const CourierTable = ({ couriers, isLoading, onEdit, onDelete }) => {
   const getStatusBadge = (status) => {
@@ -68,7 +69,7 @@ const CourierTable = ({ couriers, isLoading, onEdit, onDelete }) => {
                           : "badge-secondary text-pink-600 border-pink-200 bg-pink-50"
                       }`}
                     >
-                      {item.shift_code === 1 ? "Shift 1 (Pagi)" : "Shift 2 (Sore)"}
+                      {getShiftLabel(item.shift_code)}
                     </span>
                   </td>
                   <td>{getStatusBadge(item.status)}</td>

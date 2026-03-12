@@ -72,3 +72,22 @@ export const sanitizePhoneNumber = (rawInput) => {
 
   return clean; // Output: 628123456789
 };
+
+/**
+ * Ambil nomor HP kanonik (62xxx) HANYA dari JID WA yang format @c.us.
+ * Untuk @lid / identifier lain kembalikan null — jangan simpan di kolom phone.
+ * @param {string} waFrom - payload.from dari WAHA (mis. "6281234567890@c.us" atau "254...@lid")
+ * @returns {string|null} - "6281234567890" atau null
+ */
+export function extractCanonicalPhoneFromWaFrom(waFrom) {
+  if (!waFrom || typeof waFrom !== "string") return null;
+  const s = waFrom.trim();
+  if (!s.endsWith("@c.us")) return null;
+  const beforeAt = s.split("@")[0].replace(/:[\d]+$/, "");
+  const digits = beforeAt.replace(/[^0-9]/g, "");
+  if (!digits) return null;
+  const normalized = sanitizePhoneNumber(digits) || sanitizePhoneNumber("0" + digits);
+  return normalized && normalized.startsWith("62") && digits.length >= 10 && digits.length <= 15
+    ? normalized
+    : null;
+}

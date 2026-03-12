@@ -16,7 +16,12 @@ import logger from "./src/utils/logger.js";
 import webhookRoutes from "./src/routes/webhookRoutes.js";
 import apiRoutes from "./src/routes/apiRoutes.js";
 import { startDispatchScheduler, stopDispatchScheduler } from "./src/services/dispatchScheduler.js";
-import { startAutoCancelScheduler, stopAutoCancelScheduler } from "./src/services/autoCancelScheduler.js";
+import { startCourierShiftScheduler, stopCourierShiftScheduler } from "./src/services/courierShiftScheduler.js";
+import { startOrderConfirmScheduler, stopOrderConfirmScheduler } from "./src/services/orderConfirmScheduler.js";
+import { startOrderCompleteScheduler, stopOrderCompleteScheduler } from "./src/services/orderCompleteScheduler.js";
+import { startHumanModeRevertScheduler, stopHumanModeRevertScheduler } from "./src/services/humanModeRevertScheduler.js";
+import { startScheduler, stopScheduler } from "./src/services/messageQueueService.js";
+import { processIncomingMessage } from "./src/controllers/webhookController.js";
 
 // Load environment variables
 dotenv.config();
@@ -147,7 +152,11 @@ server.listen(PORT, () => {
   console.log(`🔗 WAHA URL: ${process.env.WAHA_API_URL}`);
   console.log(`========================================\n`);
   startDispatchScheduler();
-  startAutoCancelScheduler();
+  startCourierShiftScheduler();
+  startOrderConfirmScheduler();
+  startOrderCompleteScheduler();
+  startHumanModeRevertScheduler();
+  startScheduler(io, processIncomingMessage);
 });
 
 // Graceful shutdown
@@ -157,7 +166,11 @@ const shutdown = async (signal) => {
   server.close(async () => {
     try {
       stopDispatchScheduler();
-      stopAutoCancelScheduler();
+      stopCourierShiftScheduler();
+      stopOrderConfirmScheduler();
+      stopOrderCompleteScheduler();
+      stopHumanModeRevertScheduler();
+      stopScheduler();
       await redisClient.quit();
       await sequelize.close();
 

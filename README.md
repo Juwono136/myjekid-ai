@@ -33,7 +33,7 @@
 ### AI Chatbot Real-time
 - Layanan pelanggan dan kurir otomatis via **WhatsApp** (melalui WAHA).
 - Dukungan multi-provider AI: **Gemini**, **OpenAI**, **Ollama**, **LM Studio**.
-- Integrasi dengan **n8n** untuk alur otomatisasi (workflow).
+- **Webhook langsung WAHA → MyJek** (tanpa n8n): pesan di-antre per user dengan debounce ~2,5 detik agar pesan paralel/rapid digabung dan AI memahami konteks utuh.
 - Mode intervensi: admin dapat mengambil alih chat dari bot dan mengobrol langsung dengan pengguna/customer.
 
 ### Admin Dashboard (Web App)
@@ -202,6 +202,19 @@ Variabel berikut digunakan backend (dan bisa diset di `server/.env` atau environ
 | `OPENAI_API_KEY` | API key OpenAI | |
 | `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | Untuk Ollama (local) | |
 | `LMSTUDIO_BASE_URL`, `LMSTUDIO_MODEL`, `LMSTUDIO_API_KEY` | Untuk LM Studio (local) | |
+| **Base Camp (Live Map & Dispatch)** | | |
+| `BASE_CAMP_LAT`, `BASE_CAMP_LNG` | Koordinat titik kumpul kurir (Taman Kodim) | `-8.4896`, `117.4219` |
+| `BASE_CAMP_RADIUS_KM` | Radius (km) untuk dispatch & tampilan peta | `10` |
+| **Testing** | | |
+| `ENABLE_WHATSAPP_TEST_MODE` | Set `true` agar perintah #TEST KURIR / #TEST USER aktif di production; kurir dalam test mode mengabaikan radius base camp | `true` / (kosong) |
+
+---
+
+## Live Map & Base Camp
+
+- **Base camp** (Taman Kodim) dipakai untuk: (1) menampilkan radius di halaman **Live Map Kurir**, (2) memilih kurir yang mendapat tawaran order (hanya yang dalam radius atau tanpa koordinat).
+- Kurir dapat **membagikan lokasi via WhatsApp** (Share Location) ke nomor bot; posisi akan diperbarui di database dan ditampilkan real-time di Live Map (Socket.IO).
+- **Saat pengujian** (#TEST KURIR): kurir yang dalam mode testing **mengabaikan pengecekan radius base camp**, sehingga order tetap bisa diambil meskipun posisi kurir di luar radius (berguna saat testing dari lokasi lain).
 
 ---
 
@@ -231,6 +244,7 @@ Variabel berikut digunakan backend (dan bisa diset di `server/.env` atau environ
 | GET/PATCH | `/api/notifications`, `/api/notifications/:id/read` | Notifikasi |
 | GET | `/api/reports/summary`, `/api/reports/chart`, `/api/reports/transactions` | Laporan |
 | GET | `/api/reports/export/excel` | Export Excel |
+| GET | `/api/config/base-camp` | Konfigurasi base camp (lat, lng, radius_km) untuk Live Map |
 | GET/POST/PUT/DELETE | `/api/couriers`, `/api/couriers/:id` | CRUD kurir |
 | GET/POST/PUT/DELETE | `/api/admins`, `/api/admins/:id` | CRUD admin (SUPER_ADMIN only) |
 
@@ -238,8 +252,8 @@ Variabel berikut digunakan backend (dan bisa diset di `server/.env` atau environ
 
 | Method | Path | Deskripsi |
 |--------|------|-----------|
-| POST | `/webhook/whatsapp` | Menerima pesan masuk dari WAHA |
-| POST | `/webhook/admin/session` | Set session mode (dipanggil n8n / dashboard) |
+| POST | `/webhook/whatsapp` | Menerima pesan masuk dari WAHA (langsung). Pesan di-enqueue & diproses dengan debounce per pengirim; balasan dikirim ke WAHA oleh backend. |
+| POST | `/webhook/admin/session` | Set session mode (dipanggil dashboard) |
 | GET | `/webhook/health` | Health check layanan webhook |
 
 ---
@@ -284,8 +298,7 @@ Route yang memakai `restrictTo` hanya bisa diakses oleh role yang disebutkan.
 
 ## Integrasi Eksternal
 
-- **WAHA** — WhatsApp HTTP API untuk kirim/terima pesan; backend menerima webhook di `/webhook/whatsapp`.
-- **n8n** — Workflow automation; dapat memanggil `/webhook/admin/session` dan endpoint lain sesuai kebutuhan.
+- **WAHA** — WhatsApp HTTP API. Atur webhook WAHA ke `https://<your-api>/api/webhook/whatsapp` agar pesan masuk langsung ke MyJek. Backend mengantre pesan per user (debounce ~2,5 s), memproses batch, lalu mengirim balasan ke WAHA (tanpa n8n).
 - **MinIO/S3** — Penyimpanan file (bukti, gambar); akses via `BASE_IMAGE_URL` + bucket.
 - **Redis** — Session/cache (jika dikonfigurasi).
 - **AI** — Satu provider aktif sesuai `AI_PROVIDER`; factory di backend memilih adapter (Gemini, OpenAI, Ollama, LM Studio).

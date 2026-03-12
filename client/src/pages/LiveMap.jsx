@@ -2,11 +2,11 @@ import { useEffect, useState, useMemo } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { fetchCouriers } from "../features/courierSlice";
 import { socket } from "../services/socketClient";
+import { configService } from "../services/configService";
 
 import CourierMap from "../components/map/CourierMap";
 import CourierListOverlay from "../components/map/CourierListOverlay";
 import PageHeader from "../components/common/PageHeader";
-import { FiMap } from "react-icons/fi";
 import Loader from "../components/Loader";
 import useDebounce from "../hooks/useDebounce";
 
@@ -19,6 +19,7 @@ const LiveMap = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const debouncedSearch = useDebounce(searchTerm, 500);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [baseCamp, setBaseCamp] = useState(null);
 
   // Normalisasi Data
   const normalizeCourierData = (data) => {
@@ -47,6 +48,16 @@ const LiveMap = () => {
   useEffect(() => {
     loadData();
 
+    const loadBaseCamp = async () => {
+      try {
+        const res = await configService.getBaseCamp();
+        if (res?.data) setBaseCamp(res.data);
+      } catch (e) {
+        console.warn("Base camp config tidak loaded:", e?.message);
+      }
+    };
+    loadBaseCamp();
+
     if (!socket.connected) {
       socket.connect();
     }
@@ -61,24 +72,22 @@ const LiveMap = () => {
             lat: data.lat,
             lng: data.lng,
             last_active_at: data.updatedAt || new Date(),
-            status: "BUSY",
+            status: data.status ?? updatedList[index].status,
           };
           return updatedList;
-        } else {
-          // Insert baru jika belum ada
-          return [
-            ...prevData,
-            {
-              id: data.id,
-              name: data.name || "Kurir Baru",
-              phone: data.phone || "",
-              lat: data.lat,
-              lng: data.lng,
-              status: "BUSY",
-              last_active_at: new Date(),
-            },
-          ];
         }
+        return [
+          ...prevData,
+          {
+            id: data.id,
+            name: data.name || "Kurir Baru",
+            phone: data.phone || "",
+            lat: data.lat,
+            lng: data.lng,
+            status: data.status || "IDLE",
+            last_active_at: data.updatedAt || new Date(),
+          },
+        ];
       });
     };
 
@@ -119,11 +128,10 @@ const LiveMap = () => {
 
   return (
     <div className="h-[calc(100vh-6rem)] flex flex-col space-y-4">
-      <div className="flex-none hidden md:block">
+      <div className="flex-none md:block">
         <PageHeader
           title="Live Tracking Armada"
-          subtitle="Pemantauan lokasi kurir secara real-time via WhatsApp Live Location."
-          icon={FiMap}
+          description="Peta base camp (Taman Kodim) dan posisi kurir. Kurir dapat membagikan lokasi via WhatsApp agar tampil di peta."
         />
       </div>
 
@@ -139,6 +147,7 @@ const LiveMap = () => {
               couriers={mapMarkers}
               selectedCourier={selectedCourier}
               onMarkerClick={handleSelectCourier}
+              baseCamp={baseCamp}
             />
             {/* List Overlay menerima SEMUA data (termasuk yang lokasi null) */}
             <CourierListOverlay

@@ -11,6 +11,9 @@ import Notification from "./notification.js";
 User.hasMany(Order, { foreignKey: "user_phone", sourceKey: "phone" });
 Order.belongsTo(User, { foreignKey: "user_phone", targetKey: "phone" });
 
+// User -> Order (Current/Latest Order)
+User.belongsTo(Order, { foreignKey: "order_id", targetKey: "order_id", as: "currentOrder" });
+
 // Courier <-> Order
 Courier.hasMany(Order, { foreignKey: "courier_id", sourceKey: "id" });
 Order.belongsTo(Courier, { foreignKey: "courier_id", targetKey: "id" });

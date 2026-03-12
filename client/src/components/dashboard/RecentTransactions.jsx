@@ -9,15 +9,15 @@ const RecentTransactions = ({ orders }) => {
       maximumFractionDigits: 0,
     }).format(num);
 
-  const parseItems = (json) => {
-    try {
-      const parsed = typeof json === "string" ? JSON.parse(json) : json;
-      if (Array.isArray(parsed)) return parsed;
-      if (typeof parsed === "object" && parsed !== null) return [parsed];
-      return [];
-    } catch (e) {
-      return [];
-    }
+  /** Ringkasan chat_messages (array of string) — max 2 baris, dipotong dengan ... */
+  const chatSummary = (chatMessages, maxLines = 2) => {
+    if (!Array.isArray(chatMessages) || chatMessages.length === 0) return "—";
+    const lines = chatMessages
+      .map((m) => (typeof m === "string" ? m : m?.body ?? String(m)).trim())
+      .filter(Boolean);
+    if (lines.length === 0) return "—";
+    const joined = lines.slice(0, maxLines).join(" · ");
+    return lines.length > maxLines ? `${joined}…` : joined;
   };
 
   const StatusBadge = ({ status }) => {
@@ -58,62 +58,42 @@ const RecentTransactions = ({ orders }) => {
           <thead className="bg-gray-50 text-gray-500 text-[11px] uppercase tracking-wide font-semibold sticky top-0 z-10 shadow-sm">
             <tr>
               <th className="py-3 pl-5 bg-gray-50">Order ID</th>
-              <th className="py-3 bg-gray-50">Items Detail</th>
+              <th className="py-3 bg-gray-50">Ringkasan Chat</th>
+              <th className="py-3 bg-gray-50">Nama Pelanggan</th>
               <th className="py-3 bg-gray-50">Total Tagihan</th>
               <th className="py-3 bg-gray-50">Status</th>
               <th className="py-3 pr-5 bg-gray-50">Waktu</th>
             </tr>
           </thead>
           <tbody className="text-sm divide-y divide-gray-50 bg-white">
-            {orders?.map((order) => {
-              const items = parseItems(order.items_summary);
-              return (
-                <tr key={order.order_id} className="hover:bg-blue-50/20 transition-colors">
-                  <td className="pl-5 py-3 align-top">
-                    <span className="font-mono text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">
-                      {order.order_id}
-                    </span>
-                  </td>
-
-                  {/* Items Detail Column */}
-                  <td className="py-3 align-top">
-                    <div className="flex flex-col gap-1">
-                      {items.length > 0 ? (
-                        items.map((itm, i) => (
-                          <div key={i} className="flex items-start gap-2 text-xs">
-                            <span className="font-bold text-gray-700 min-w-5">{itm.qty}x</span>
-                            <div className="flex flex-col">
-                              <span className="text-gray-800 capitalize">{itm.item}</span>
-                              {itm.note && (
-                                <span className="text-[10px] text-orange-500 italic">
-                                  Note: {itm.note}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <span className="text-gray-300 italic text-xs">-</span>
-                      )}
-                    </div>
-                  </td>
-
-                  <td className="py-3 align-top font-bold text-gray-700 text-xs">
-                    {formatRupiah(order.total_amount)}
-                  </td>
-                  <td className="py-3 align-top">
-                    <StatusBadge status={order.status} />
-                  </td>
-                  <td className="pr-5 py-3 align-top text-xs text-gray-400">
-                    {format(new Date(order.created_at), "dd/MM HH:mm", { locale: id })}
-                  </td>
-                </tr>
-              );
-            })}
+            {orders?.map((order) => (
+              <tr key={order.order_id} className="hover:bg-blue-50/20 transition-colors">
+                <td className="pl-5 py-3 align-top">
+                  <span className="font-mono text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">
+                    {order.order_id}
+                  </span>
+                </td>
+                <td className="py-3 align-top text-xs text-gray-700 max-w-[180px] truncate" title={chatSummary(order.chat_messages, 5)}>
+                  {chatSummary(order.chat_messages)}
+                </td>
+                <td className="py-3 align-top text-xs text-gray-800">
+                  {order.user?.name || "—"}
+                </td>
+                <td className="py-3 align-top font-bold text-gray-700 text-xs">
+                  {formatRupiah(order.total_amount)}
+                </td>
+                <td className="py-3 align-top">
+                  <StatusBadge status={order.status} />
+                </td>
+                <td className="pr-5 py-3 align-top text-xs text-gray-400">
+                  {format(new Date(order.created_at), "dd/MM HH:mm", { locale: id })}
+                </td>
+              </tr>
+            ))}
 
             {(!orders || orders.length === 0) && (
               <tr>
-                <td colSpan="5" className="text-center py-10 text-gray-400 text-sm">
+                <td colSpan="7" className="text-center py-10 text-gray-400 text-sm">
                   Belum ada transaksi
                 </td>
               </tr>

@@ -1,6 +1,6 @@
 import { format } from "date-fns";
 import { id } from "date-fns/locale";
-import { FiEye, FiUser, FiMapPin, FiEdit2 } from "react-icons/fi";
+import { FiEye, FiUser, FiEdit2 } from "react-icons/fi";
 import Loader from "../Loader";
 import EmptyState from "../common/EmptyState";
 
@@ -47,7 +47,7 @@ const OrderTable = ({ orders, isLoading, onOpenDetail, onOpenEdit, canEditOrder 
           <tr>
             <th className="py-4 pl-6 w-50">Order ID</th>
             <th className="w-60">Customer Info</th>
-            <th>Tujuan Pengiriman</th>
+            <th>Ringkasan Chat</th>
             <th>Total Transaksi</th>
             <th className="w-50">Status</th>
             <th className="w-30">Waktu</th>
@@ -79,13 +79,18 @@ const OrderTable = ({ orders, isLoading, onOpenDetail, onOpenEdit, canEditOrder 
                   </div>
                 </td>
                 <td className="align-top">
-                  <div className="flex items-start gap-2 max-w-55">
-                    <FiMapPin className="text-gray-400 mt-1 shrink-0" size={12} />
+                  <div className="flex items-start gap-2 max-w-80">
                     <span
-                      className="text-gray-600 text-xs leading-relaxed truncate"
-                      title={order.delivery_address}
+                      className="text-gray-600 text-xs leading-relaxed line-clamp-2"
+                      title={
+                        Array.isArray(order.chat_messages) && order.chat_messages.length
+                          ? String(order.chat_messages[0])
+                          : ""
+                      }
                     >
-                      {order.delivery_address || "-"}
+                      {Array.isArray(order.chat_messages) && order.chat_messages.length
+                        ? String(order.chat_messages[0]).slice(0, 120)
+                        : "-"}
                     </span>
                   </div>
                 </td>

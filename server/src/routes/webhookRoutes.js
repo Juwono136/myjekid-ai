@@ -4,10 +4,10 @@ import { setSessionMode } from "../controllers/adminController.js";
 
 const router = express.Router();
 
-// Endpoint utama menerima pesan
+// Endpoint utama: WAHA memanggil langsung. Pesan di-enqueue lalu diproses dengan debounce per user.
 router.post("/whatsapp", webhookController.handleIncomingMessage);
 
-// Endpoint ini yang dipanggil oleh N8N / Admin Dashboard
+// Endpoint ini yang dipanggil oleh Admin Dashboard
 router.post("/admin/session", setSessionMode);
 
 // Endpoint untuk test status (Health Check khusus webhook)

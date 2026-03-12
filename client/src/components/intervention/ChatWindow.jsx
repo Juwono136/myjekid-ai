@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useDispatch } from "react-redux";
-import { toggleSessionMode } from "../../features/interventionSlice";
+import { toggleSessionMode, fetchSessions } from "../../features/interventionSlice";
 import toast from "react-hot-toast";
 import { FiMessageSquare } from "react-icons/fi";
 
@@ -13,11 +13,12 @@ import ModeToggleModal from "./ModeToggleModal";
 const ChatWindow = ({ session, messages = [], isLoadingHistory, onBack, onSendMessage }) => {
   const dispatch = useDispatch();
 
-  // State Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [pendingMode, setPendingMode] = useState(null);
+  const [isToggling, setIsToggling] = useState(false);
 
   const handleToggleRequest = () => {
+    if (!session?.phone) return;
     if (session.mode === "BOT") {
       setPendingMode("HUMAN");
     } else {
@@ -27,12 +28,16 @@ const ChatWindow = ({ session, messages = [], isLoadingHistory, onBack, onSendMe
   };
 
   const executeToggle = async () => {
+    if (!pendingMode || !session?.phone) {
+      setIsModalOpen(false);
+      setPendingMode(null);
+      return;
+    }
+    setIsToggling(true);
     try {
-      if (!pendingMode) return;
-
       await dispatch(
         toggleSessionMode({
-          phone: session.phone,
+          phone: String(session.phone).trim(),
           mode: pendingMode,
         })
       ).unwrap();
@@ -40,10 +45,14 @@ const ChatWindow = ({ session, messages = [], isLoadingHistory, onBack, onSendMe
       toast.success(pendingMode === "HUMAN" ? "Mode Human Aktif" : "Bot Diaktifkan Kembali");
       setIsModalOpen(false);
       setPendingMode(null);
+      dispatch(fetchSessions());
     } catch (error) {
-      console.error(error);
-      toast.error("Gagal mengubah mode chat");
+      console.error("Toggle mode error:", error);
+      toast.error(error?.message || "Gagal mengubah mode chat");
       setIsModalOpen(false);
+      setPendingMode(null);
+    } finally {
+      setIsToggling(false);
     }
   };
 
@@ -68,8 +77,9 @@ const ChatWindow = ({ session, messages = [], isLoadingHistory, onBack, onSendMe
       <ModeToggleModal
         isOpen={isModalOpen}
         targetMode={pendingMode}
-        onClose={() => setIsModalOpen(false)}
+        onClose={() => !isToggling && setIsModalOpen(false)}
         onConfirm={executeToggle}
+        isLoading={isToggling}
       />
 
       {/* Header */}

@@ -59,7 +59,8 @@ export const toggleSessionMode = createAsyncThunk(
       const response = await interventionService.toggleMode(phone, mode);
       return { phone, mode, data: response.data };
     } catch (error) {
-      return thunkAPI.rejectWithValue(error.message);
+      const message = error.response?.data?.message || error.message;
+      return thunkAPI.rejectWithValue(message);
     }
   }
 );
@@ -152,7 +153,7 @@ const interventionSlice = createSlice({
       })
       .addCase(fetchChatHistory.fulfilled, (state, action) => {
         state.isLoadingHistory = false;
-        state.messages = action.payload;
+        state.messages = Array.isArray(action.payload?.data) ? action.payload.data : (Array.isArray(action.payload) ? action.payload : []);
       })
       .addCase(fetchChatHistory.rejected, (state, action) => {
         state.isLoadingHistory = false;
@@ -173,26 +174,27 @@ const interventionSlice = createSlice({
       // Resolve Session
       .addCase(resolveSession.fulfilled, (state, action) => {
         const phone = action.payload;
-        // Update mode di list sessions jadi 'BOT'
-        const session = state.sessions.find((s) => s.phone === phone);
-        if (session) session.mode = "BOT";
-
-        // Update mode di activeSession jika sama
+        const sessionIndex = state.sessions.findIndex((s) => s.phone === phone);
+        if (sessionIndex !== -1) {
+          state.sessions[sessionIndex] = { ...state.sessions[sessionIndex], mode: "BOT" };
+        }
         if (state.activeSession?.phone === phone) {
-          state.activeSession.mode = "BOT";
+          state.activeSession = { ...state.activeSession, mode: "BOT" };
         }
       })
 
       .addCase(toggleSessionMode.fulfilled, (state, action) => {
         const { phone, mode } = action.payload;
 
-        // Update di Session List
-        const session = state.sessions.find((s) => s.phone === phone);
-        if (session) session.mode = mode;
+        // Update di Session List (immutable agar UI pasti re-render)
+        const sessionIndex = state.sessions.findIndex((s) => s.phone === phone);
+        if (sessionIndex !== -1) {
+          state.sessions[sessionIndex] = { ...state.sessions[sessionIndex], mode };
+        }
 
-        // Update di Active Session (jika sedang dibuka)
+        // Update di Active Session (objek baru agar referensi berubah)
         if (state.activeSession?.phone === phone) {
-          state.activeSession.mode = mode;
+          state.activeSession = { ...state.activeSession, mode };
         }
       });
   },
